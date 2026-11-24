@@ -48,12 +48,12 @@ export class MatchLog {
 	}
 
 	/**
-	 * What the form starts with for a new game: the opponent and archetype
-	 * of the last game logged this session, and the patch of the newest game.
+	 * What the form starts with for a new game: only the patch (of the last
+	 * game logged this session, else the newest game). Opponent and archetype
+	 * change nearly every game, so they start blank.
 	 */
 	defaults(games: LoggedGame[]): Partial<Match> {
-		const patch = this.plugin.lastMatch.patch ?? games.filter((g) => g.match.patch).pop()?.match.patch ?? "";
-		return { ...this.plugin.lastMatch, patch };
+		return { patch: this.plugin.lastPatch ?? games.filter((g) => g.match.patch).pop()?.match.patch ?? "" };
 	}
 
 	/** The deck the form starts with for a new game: the deck of the newest game whose note is still in the deck picker. */
@@ -72,7 +72,7 @@ export class MatchLog {
 			const upgraded = upgradeLog(text);
 			return addLogRow(upgraded, formatLogRow(this.deckCell(deck), match, logColumns(upgraded)));
 		});
-		this.plugin.lastMatch = { opponent: match.opponent, archetype: match.archetype, patch: match.patch };
+		this.plugin.lastPatch = match.patch;
 		const record = tally((await this.games()).games.filter((g) => g.file === deck).map((g) => g.match));
 		new Notice(`ChronoVault: ${match.result === "W" ? "win" : "loss"} logged for ${deck.basename} (now ${record.wins}–${record.losses}).`);
 	}

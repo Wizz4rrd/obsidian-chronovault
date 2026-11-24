@@ -25,7 +25,6 @@ import { cardImageUrls } from "./src/utils/imageUrl";
 import { deckNoteFrontmatter, firstDeckBlockLink, updateDeckNoteProperties } from "./src/templates/DeckNoteSync";
 import { DEFAULT_TEMPLATES, NoteTemplates, TEMPLATE_FILE_NAMES, TemplateKind, TournamentDeck } from "./src/templates/Templates";
 import { TournamentModal, TournamentOptions } from "./src/ui/TournamentModal";
-import { Match } from "./src/data/matches";
 import { MatchLog } from "./src/tracker/MatchLog";
 import { MatchTrackerView, VIEW_TYPE_MATCH_TRACKER } from "./src/tracker/MatchTrackerView";
 import { RecordMatchModal } from "./src/tracker/RecordMatchModal";
@@ -36,8 +35,8 @@ export default class ChronoVaultPlugin extends Plugin {
 	sync!: DataSync;
 	templates = new NoteTemplates(this);
 	matchLog = new MatchLog(this);
-	/** Opponent / archetype / patch of the last recorded game, preselected for the next one. */
-	lastMatch: Partial<Match> = {};
+	/** Patch of the last recorded game, preselected for the next one. */
+	lastPatch: string | null = null;
 
 	async onload(): Promise<void> {
 		const migratedFromRuneterra = await this.loadSettings();
