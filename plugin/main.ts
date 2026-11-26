@@ -21,7 +21,7 @@ import { copyDeckCode } from "./src/ui/DeckWidgets";
 import { ImportDeckModal } from "./src/ui/ImportDeckModal";
 import { TextPromptModal } from "./src/ui/TextPromptModal";
 import { imageCache } from "./src/utils/ImageCache";
-import { cardImageUrls } from "./src/utils/imageUrl";
+import { imageUrlsToSave } from "./src/utils/imageUrl";
 import { deckNoteFrontmatter, firstDeckBlockLink, updateDeckNoteProperties } from "./src/templates/DeckNoteSync";
 import { DEFAULT_TEMPLATES, NoteTemplates, TEMPLATE_FILE_NAMES, TemplateKind, TournamentDeck } from "./src/templates/Templates";
 import { TournamentModal, TournamentOptions } from "./src/ui/TournamentModal";
@@ -429,7 +429,7 @@ export default class ChronoVaultPlugin extends Plugin {
 	/** Save a shrunk copy of every card image (in the selected style) that isn't saved yet. */
 	async downloadAllCardImages(): Promise<void> {
 		if (imageCache.downloadProgress?.running) return;
-		const result = await imageCache.downloadAll(cardImageUrls(this.cards.all(), this.settings));
+		const result = await imageCache.downloadAll(imageUrlsToSave(this.cards.all(), this.settings));
 		const saved = result.done - result.failed;
 		const failed = result.failed ? `, ${result.failed} failed` : "";
 		// Turning off "Save card images" stops the download and deletes what it saved.

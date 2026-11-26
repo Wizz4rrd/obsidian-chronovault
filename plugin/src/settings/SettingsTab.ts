@@ -4,7 +4,7 @@ import { DataSourceId } from "../data/DataSync";
 import { BuilderDraft, emptyDeck } from "../ui/DeckBuilderView";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { CACHED_IMAGE_KB, CACHED_IMAGE_WIDTH, DownloadProgress, imageCache, ORIGINAL_IMAGE_KB } from "../utils/ImageCache";
-import { cardImageUrls } from "../utils/imageUrl";
+import { imageUrlsToSave } from "../utils/imageUrl";
 
 /** Full card render (frame, stats and text on the image) vs illustration only. */
 export type CardImageStyle = "game" | "full";
@@ -335,7 +335,7 @@ export class ChronoSettingsTab extends PluginSettingTab {
 		const stopListening = imageCache.onDownloadProgress(show);
 		const stopRefreshing = this.keepFresh(() => {
 			// Each image style has its own images.
-			urls = cardImageUrls(this.plugin.cards.all(), s);
+			urls = imageUrlsToSave(this.plugin.cards.all(), s);
 			show(imageCache.downloadProgress);
 		});
 		return () => {
