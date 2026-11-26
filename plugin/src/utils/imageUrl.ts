@@ -1,5 +1,6 @@
-import { Card } from "../data/types";
+import { Card, SYNDICATES } from "../data/types";
 import { ChronoSettings } from "../settings/SettingsTab";
+import { syndicateIconUrl } from "../ui/SyndicateIcon";
 import { imageCache } from "./ImageCache";
 
 /** Show `card`'s image in `img`, from the local image cache when enabled. */
@@ -35,4 +36,14 @@ export function cardImageUrls(cards: readonly Card[], settings: ChronoSettings):
 		if (url) urls.add(url);
 	}
 	return Array.from(urls);
+}
+
+/**
+ * What "Download all" saves: every card image, plus the syndicate icons so they
+ * also show offline (not with the "Bundled" source, which shows built-in icons).
+ */
+export function imageUrlsToSave(cards: readonly Card[], settings: ChronoSettings): string[] {
+	const urls = cardImageUrls(cards, settings);
+	if (!urls.length || !imageCache.online) return urls;
+	return [...urls, ...SYNDICATES.map(syndicateIconUrl)];
 }
