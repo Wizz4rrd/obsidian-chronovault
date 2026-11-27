@@ -1,4 +1,4 @@
-import { normalizePath, requestUrl } from "obsidian";
+import { normalizePath, requestUrl, type TAbstractFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { fitWidth, pngSize } from "./imageSize";
 
@@ -45,11 +45,13 @@ export class ImageCache {
 	/** The folder the images are saved in, once {@link relocate} has run. */
 	private folder: string | null = null;
 	private ready: Promise<void> = Promise.resolve();
-	/** File names in the cache folder: read once, then kept up to date. */
+	/** File names in the cache folder: read once, then kept up to date (also with the files sync adds or removes, see {@link watch}). */
 	private onDisk = new Set<string>();
 	private index: Promise<void> | null = null;
 	/** Bumped by {@link clear} so work started before it is dropped. */
 	private generation = 0;
+	/** The plugin is moving or deleting the folder itself: its own file events are ignored. */
+	private busy = false;
 	/**
 	 * One resource URL per cached file. Desktop Obsidian adds `?<Date.now()>` to
 	 * paths outside the vault index, so asking again for every render would miss
@@ -75,6 +77,57 @@ export class ImageCache {
 		this.reset();
 		this.ready = this.relocate();
 		void this.loadIndex();
+		this.watch(plugin);
+	}
+
+	/**
+	 * Follow the files other devices add or remove through sync while Obsidian
+	 * stays open (iPadOS keeps it running for days): without this a WebP saved
+	 * on desktop is missed and downloaded again, and a PNG desktop converted
+	 * shows as a broken image. Only the vault folder: the plugin folder is
+	 * outside the vault index, {@link download} looks on disk for those.
+	 */
+	private watch(plugin: ChronoVaultPlugin): void {
+		const vault = plugin.app.vault;
+		plugin.registerEvent(vault.on("create", (file) => this.added(file.path)));
+		plugin.registerEvent(vault.on("delete", (file) => this.removed(file.path)));
+		plugin.registerEvent(
+			vault.on("rename", (file: TAbstractFile, oldPath: string) => {
+				this.removed(oldPath);
+				this.added(file.path);
+			}),
+		);
+	}
+
+	/** The file name of `path` when it's in the cache folder, else null. */
+	private nameIn(path: string): string | null {
+		const dir = this.dir();
+		const slash = path.lastIndexOf("/");
+		return dir && path.slice(0, slash) === dir ? path.slice(slash + 1) : null;
+	}
+
+	private added(path: string): void {
+		if (this.busy) return;
+		const name = this.nameIn(path);
+		if (name) this.onDisk.add(name);
+	}
+
+	private removed(path: string): void {
+		if (this.busy) return;
+		if (path === this.dir()) {
+			const shown = this.shown();
+			this.onDisk.clear();
+			this.urls.clear();
+			this.reload(shown);
+			return;
+		}
+		const name = this.nameIn(path);
+		if (!name || !this.onDisk.delete(name)) return;
+		const resource = this.urls.get(name);
+		const url = this.sources.get(name);
+		this.urls.delete(name);
+		// Images showing it switch to the other format, or download it again.
+		if (resource && url) this.reload(new Map([[resource, url]]));
 	}
 
 	/**
@@ -181,7 +234,12 @@ export class ImageCache {
 		this.generation++;
 		const adapter = this.plugin?.app.vault.adapter;
 		const dir = this.dir();
-		if (adapter && dir && (await adapter.exists(dir))) await adapter.rmdir(dir, true);
+		this.busy = true;
+		try {
+			if (adapter && dir && (await adapter.exists(dir))) await adapter.rmdir(dir, true);
+		} finally {
+			this.busy = false;
+		}
 		const shown = this.shown();
 		this.reset();
 		this.index = Promise.resolve();
@@ -236,7 +294,12 @@ export class ImageCache {
 		if (from !== to) {
 			// Downloads still writing to the old folder are dropped; images keep showing from it until the move is done.
 			this.generation++;
-			await this.moveFiles(from, to);
+			this.busy = true;
+			try {
+				await this.moveFiles(from, to);
+			} finally {
+				this.busy = false;
+			}
 			const shown = this.shown();
 			this.folder = to;
 			this.reset();
@@ -344,6 +407,15 @@ export class ImageCache {
 		return null;
 	}
 
+	/** Like {@link savedName}, but looks in the folder itself: for files the index missed. */
+	private async findOnDisk(url: string, dir: string): Promise<string | null> {
+		const adapter = this.plugin?.app.vault.adapter;
+		if (!adapter) return null;
+		const base = this.baseName(url);
+		for (const ext of FORMATS) if (await adapter.exists(`${dir}/${base}.${ext}`)) return `${base}.${ext}`;
+		return null;
+	}
+
 	/** Re-encode the PNGs (saved by iOS) as WebP, when this device can, and delete them. */
 	private async convertToWebp(dir: string, generation: number): Promise<void> {
 		const adapter = this.plugin?.app.vault.adapter;
@@ -447,13 +519,15 @@ export class ImageCache {
 		const adapter = this.plugin?.app.vault.adapter;
 		const dir = this.dir();
 		if (!adapter || !dir) return null;
-		const name = this.fileName(url);
-		const path = `${dir}/${name}`;
-		// A download that was still running when the cache was cleared must not write into it again.
 		const generation = this.generation;
+		// A download that was still running when the cache was cleared must not write into it again.
 		const cleared = () => generation !== this.generation;
 		try {
-			if (!(await adapter.exists(path))) {
+			// Saved meanwhile, or by another device in the other format: never download it twice.
+			let name = await this.findOnDisk(url, dir);
+			if (!name) {
+				name = this.fileName(url);
+				const path = `${dir}/${name}`;
 				const res = await requestUrl({ url, throw: false });
 				const type = (res.headers["content-type"] ?? res.headers["Content-Type"] ?? "").toLowerCase();
 				if (res.status < 200 || res.status >= 300 || !type.startsWith("image/")) {
