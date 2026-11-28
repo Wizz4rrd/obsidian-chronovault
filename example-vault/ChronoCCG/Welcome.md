@@ -65,19 +65,26 @@ The **layers** ribbon icon opens a searchable side panel with filters (cost, syn
 
 ## 6. Note templates
 - **New deck note** → `ChronoCCG/Decks`
-- **New tournament report** → `ChronoCCG/Tournaments` (copies the decklist from the active note) — see [[2026-11-02 Weekly Dive]]
+- **New tournament report** → `ChronoCCG/Tournaments`: event, date, format, planned rounds and the decks you bring (deck notes, or pasted codes, which get a deck note) — see [[2026-11-02 Weekly Dive]] and [[2026-11-16 Chrono Cup]]
 - **Write default templates to the template folder** gives you editable copies of the templates.
 - [[Decks.base]] lists the deck notes in a base, with the **ChronoVault decks** view: Divers as card references, syndicates as icons.
 
 ## 7. Match tracker
 Click the **trophy** ribbon icon, or run **Open match tracker**.
-- **Log a game**: pick your deck and the opponent's syndicates (up to two), optionally the archetype, then press **Win** or **Loss**. The opponent is remembered for the next game.
+- **Log a game**: pick your deck, the **Type** (Ladder, Scrim, Tournament…) and the opponent's syndicates (up to two), optionally the archetype, then press **Win** or **Loss**. The type is remembered for the next game.
+- **Match types** are set in the settings: add, rename, reorder or delete them. A type marked **Tournament** also asks for the event (one of your tournament reports), the round (suggested from the report's format, with where it stands: "Round 3 of 5: 1–1 so far") and the opponent's name. The deck list then shows the decks of that report.
 - Under **Date, patch, opponent's deck, note**: the patch is filled in with the last one you logged. Paste the opponent's deck code to set their syndicates from the Divers, and open it later in the deck builder from the game list (no note is created).
-- **Filters** at the top: period, patch, deck, and **Vs**: pick one syndicate for every game against it, or two for that pair.
+- **Filters** at the top: period, patch, deck, type, and **Vs**: pick one syndicate for every game against it, or two for that pair.
 - With all decks: your decks, a **Matchups** grid (your decks × the six syndicates), and your record against each syndicate and each syndicate pair. Click a deck, a row or a cell to narrow down.
 - Pick a deck (or click it) for its own page. The **Win rate per week** chart shows how it's going.
 - Edit or delete a game from the list at the bottom.
 - **Record match result…** logs a game from anywhere, without opening the tracker.
 - Every deck note has a **Results** section (a `chrono-matches` block) with that deck's numbers and a **Log a game** button; see [[Somnus Revive]].
+- Tournament reports have one as their **Rounds** section: the games logged for that event, round by round (opponent, deck, games, result, notes), with the rounds not played yet. Its **Log a game** button presets the event. The plugin keeps the report's `record` property up to date and never edits the rest of the note. See [[2026-11-02 Weekly Dive]] (finished, 3–1) and [[2026-11-16 Chrono Cup]] (round 3 still going).
+- Add a `type:` line to a block to count only some types. Your ladder games only:
+
+```chrono-matches
+type: Ladder
+```
 
 Games are saved in [[Match log]], one row per game, so you can also edit them by hand.

@@ -1,10 +1,11 @@
-import { App, ButtonComponent, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
+import { App, ButtonComponent, Notice, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { DataSourceId } from "../data/DataSync";
 import { BuilderDraft, emptyDeck } from "../ui/DeckBuilderView";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { CACHED_IMAGE_KB, CACHED_IMAGE_WIDTH, DownloadProgress, imageCache, ORIGINAL_IMAGE_KB } from "../utils/ImageCache";
-import { imageUrlsToSave } from "../utils/imageUrl";
+import { imagesToSave } from "../utils/imageUrl";
+import { TextPromptModal } from "../ui/TextPromptModal";
 
 /** Full card render (frame, stats and text on the image) vs illustration only. */
 export type CardImageStyle = "game" | "full";
@@ -16,6 +17,19 @@ export type ImageFolder = "vault" | "plugin";
 
 /** The card browser as a page (tab in the main area) or in the right sidebar. */
 export type CardBrowserPlacement = "tab" | "sidebar";
+
+/** A kind of game the match tracker can log, e.g. "Ladder". */
+export interface MatchType {
+	name: string;
+	/** Games of this type are played in a tournament: they link to its report and have a round. */
+	tournament: boolean;
+}
+
+export const DEFAULT_MATCH_TYPES: MatchType[] = [
+	{ name: "Ladder", tournament: false },
+	{ name: "Scrim", tournament: false },
+	{ name: "Tournament", tournament: true },
+];
 
 export interface ChronoSettings {
 	dataSource: DataSourceId;
@@ -42,6 +56,8 @@ export interface ChronoSettings {
 	matchLog: string;
 	/** Deck links in the match log show the deck's name ("[[Decks/Egg Novice|Egg Novice]]"). */
 	matchLogDeckAlias: boolean;
+	/** Types offered when logging a game, in this order. */
+	matchTypes: MatchType[];
 	cardBrowserPlacement: CardBrowserPlacement;
 	/** Height of the card browser's filters, in % of the pane (the rest is the cards). */
 	browserFiltersPercent: number;
@@ -65,6 +81,7 @@ export const DEFAULT_SETTINGS: ChronoSettings = {
 	deckChangelog: true,
 	matchLog: "",
 	matchLogDeckAlias: true,
+	matchTypes: DEFAULT_MATCH_TYPES,
 	cardBrowserPlacement: "tab",
 	browserFiltersPercent: 42,
 	builderDraft: { deck: emptyDeck() },
@@ -201,7 +218,7 @@ export class ChronoSettingsTab extends PluginSettingTab {
 						desc:
 							'Optional. "Deck.md" and "Tournament report.md" files in this folder replace the built-in templates. ' +
 							"Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}; in tournament reports also " +
-							"{{event}} {{format}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}}.",
+							"{{event}} {{format}} {{roundCount}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}} (the live rounds of the event).",
 						control: { type: "folder", key: "templateFolder", placeholder: "ChronoCCG/Templates" },
 					},
 					{
@@ -227,6 +244,12 @@ export class ChronoSettingsTab extends PluginSettingTab {
 							"Saves on the same day are merged into one line.",
 						control: { type: "toggle", key: "deckChangelog" },
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Match tracker",
+				items: [
 					{
 						name: "Match log",
 						desc: 'Note where the match tracker saves your games, as a table you can also edit by hand. Empty = "Match log.md" in the notes folder. Renaming this setting doesn\'t move existing games.',
@@ -239,7 +262,58 @@ export class ChronoSettingsTab extends PluginSettingTab {
 					},
 				],
 			},
+			{
+				type: "list",
+				heading: "Match types",
+				emptyState: "No types: games are logged without one.",
+				addItem: { name: "Add match type", action: () => this.promptMatchType() },
+				onDelete: (i) => void this.changeMatchTypes((types) => types.splice(i, 1)),
+				onReorder: (from, to) => void this.changeMatchTypes((types) => types.splice(to, 0, ...types.splice(from, 1))),
+				items: s.matchTypes.map((t, i) => ({
+					name: t.name,
+					desc: t.tournament ? "Tournament: asks for the tournament report and the round." : "",
+					aliases: ["ladder", "scrim", "tournament"],
+					render: (setting: Setting) => {
+						setting.addExtraButton((b) => b.setIcon("pencil").setTooltip("Rename").onClick(() => this.promptMatchType(i)));
+						setting.addToggle((tg) =>
+							tg
+								.setTooltip("Tournament: games link to a tournament report and have a round")
+								.setValue(t.tournament)
+								.onChange((v) => void this.changeMatchTypes((types) => (types[i] = { ...types[i], tournament: v }))),
+						);
+					},
+				})),
+			},
 		];
+	}
+
+	/** Change the match types, save them and redraw the list. */
+	private async changeMatchTypes(change: (types: MatchType[]) => void): Promise<void> {
+		const types = this.plugin.settings.matchTypes.slice();
+		change(types);
+		this.plugin.settings.matchTypes = types;
+		await this.plugin.saveSettings();
+		this.update();
+	}
+
+	/** Ask for a new type's name, or a new name for the type at `index`. Games already logged keep their type. */
+	private promptMatchType(index?: number): void {
+		const current = index === undefined ? undefined : this.plugin.settings.matchTypes[index];
+		new TextPromptModal(this.app, {
+			title: current ? `Rename “${current.name}”` : "New match type",
+			placeholder: "e.g. Casual",
+			value: current?.name,
+			cta: current ? "Rename" : "Add",
+			onSubmit: (value) => {
+				const name = value.replace(/\s+/g, " ").replace(/\|/g, "/");
+				const taken = this.plugin.settings.matchTypes.some((t, i) => i !== index && t.name.toLowerCase() === name.toLowerCase());
+				if (taken) return void new Notice(`ChronoVault: there is already a “${name}” type.`);
+				void this.changeMatchTypes((types) => {
+					if (index === undefined) types.push({ name, tournament: false });
+					else types[index] = { ...types[index], name };
+				});
+			},
+		}).open();
 	}
 
 	/** Run `refresh` now and whenever a setting changes, until the row is torn down. */
@@ -302,23 +376,26 @@ export class ChronoSettingsTab extends PluginSettingTab {
 
 	private renderDownloadAll(setting: Setting): () => void {
 		const s = this.plugin.settings;
-		let urls: string[] = [];
+		let images: { cards: string[]; icons: string[] } = { cards: [], icons: [] };
 		let downloadBtn!: ButtonComponent;
 		setting.addButton((b) => {
 			downloadBtn = b;
 			b.onClick(() => {
 				if (imageCache.downloadProgress?.running) imageCache.cancelDownload();
-				else void this.confirmDownloadAll(urls);
+				else void this.confirmDownloadAll(images);
 			});
 		});
-		const describe = (saved: number, missing: number): string => {
+		// Cards and syndicate icons are counted apart: "All 390 cards and 6 syndicate icons are saved."
+		const describe = (savedCards: number, savedIcons: number): string => {
 			if (!s.cacheImages) return 'Turn on "Save card images" first.';
-			if (!urls.length) return "No card data yet.";
-			if (!missing) return `All ${urls.length} card images are saved.`;
-			return (
-				`${saved} of ${urls.length} card images are saved. Download the other ${missing} now, so every card also shows offline. ` +
-				`They are shrunk to ${CACHED_IMAGE_WIDTH}px like the others.`
-			);
+			const { cards, icons } = images;
+			if (!cards.length) return "No card data yet.";
+			const missingCards = cards.length - savedCards;
+			const missingIcons = icons.length - savedIcons;
+			if (!missingCards && !missingIcons) return icons.length ? `All ${cards.length} cards and ${icons.length} syndicate icons are saved.` : `All ${cards.length} card images are saved.`;
+			const saved = icons.length ? `${savedCards} of ${cards.length} cards and ${savedIcons} of ${icons.length} syndicate icons` : `${savedCards} of ${cards.length} card images`;
+			const other = !missingIcons ? `${missingCards}` : !missingCards ? `${missingIcons} icons` : `${missingCards} cards and ${missingIcons} icons`;
+			return `${saved} are saved. Download the other ${other} now, so every card also shows offline. They are shrunk to ${CACHED_IMAGE_WIDTH}px like the others.`;
 		};
 		const show = (p: DownloadProgress | null) => {
 			if (p?.running) {
@@ -326,16 +403,16 @@ export class ChronoSettingsTab extends PluginSettingTab {
 				downloadBtn.setButtonText("Cancel").removeCta().setDisabled(false);
 				return;
 			}
-			void imageCache.savedCount(urls).then((saved) => {
-				const missing = urls.length - saved;
-				setting.setDesc(describe(saved, missing));
+			void Promise.all([imageCache.savedCount(images.cards), imageCache.savedCount(images.icons)]).then(([savedCards, savedIcons]) => {
+				const missing = images.cards.length + images.icons.length - savedCards - savedIcons;
+				setting.setDesc(describe(savedCards, savedIcons));
 				downloadBtn.setButtonText("Download").setCta().setDisabled(!s.cacheImages || missing === 0);
 			});
 		};
 		const stopListening = imageCache.onDownloadProgress(show);
 		const stopRefreshing = this.keepFresh(() => {
 			// Each image style has its own images.
-			urls = imageUrlsToSave(this.plugin.cards.all(), s);
+			images = imagesToSave(this.plugin.cards.all(), s);
 			show(imageCache.downloadProgress);
 		});
 		return () => {
@@ -378,15 +455,19 @@ export class ChronoSettingsTab extends PluginSettingTab {
 		this.refreshers.forEach((refresh) => refresh());
 	}
 
-	private async confirmDownloadAll(urls: string[]): Promise<void> {
-		const missing = urls.length - (await imageCache.savedCount(urls));
-		if (!missing) return;
-		const mb = (kb: number) => Math.max(1, Math.round((missing * kb) / 1024));
+	private async confirmDownloadAll(images: { cards: string[]; icons: string[] }): Promise<void> {
+		const missingCards = images.cards.length - (await imageCache.savedCount(images.cards));
+		const missingIcons = images.icons.length - (await imageCache.savedCount(images.icons));
+		if (!missingCards && !missingIcons) return;
+		// The icons are about 3 KB each: only the card images count for the size.
+		const mb = (kb: number) => Math.max(1, Math.round((missingCards * kb) / 1024));
+		const icons = `${missingIcons} syndicate icon${missingIcons === 1 ? "" : "s"}`;
 		new ConfirmModal(this.app, {
 			title: "Download all card images",
-			message:
-				`This downloads ${missing} card images (about ${mb(ORIGINAL_IMAGE_KB)} MB) and keeps a ${CACHED_IMAGE_WIDTH}px copy of each ` +
-				`(about ${mb(CACHED_IMAGE_KB)} MB in the plugin folder). You can keep using Obsidian while it runs.`,
+			message: !missingCards
+				? `This downloads ${icons}. You can keep using Obsidian while it runs.`
+				: `This downloads ${missingCards} card images${missingIcons ? ` and ${icons}` : ""} (about ${mb(ORIGINAL_IMAGE_KB)} MB) and keeps a ${CACHED_IMAGE_WIDTH}px copy of each ` +
+					`(about ${mb(CACHED_IMAGE_KB)} MB in the plugin folder). You can keep using Obsidian while it runs.`,
 			cta: "Download",
 			onConfirm: () => void this.plugin.downloadAllCardImages(),
 		}).open();

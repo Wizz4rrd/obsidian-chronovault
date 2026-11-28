@@ -1,13 +1,13 @@
 import { debounce, ItemView, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
-import { comparePatches, formatRate, formatRecord, groupRecords, matchesVs, pairingLabel, SMALL_SAMPLE, tally, winRate } from "../data/matches";
+import { comparePatches, formatRate, formatRecord, groupRecords, Match, matchesVs, NO_TYPE, pairingLabel, SMALL_SAMPLE, tally, typeLabel, winRate } from "../data/matches";
 import { Syndicate, SYNDICATES } from "../data/types";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { renderSyndicateIcon } from "../ui/SyndicateIcon";
 import { LoggedGame } from "./MatchLog";
 import { renderMatchForm } from "./MatchForm";
 import { pairingFromLabel, renderFormStrip, renderGameRow, renderKpis, renderPairing, renderRateBar, renderRecordTable, renderWeeklyChart, syndicateRows } from "./MatchWidgets";
-import { RecordMatchModal, uniqueArchetypes, uniquePatches } from "./RecordMatchModal";
+import { matchFormOptions, newGameDefaults, RecordMatchModal, uniquePatches } from "./RecordMatchModal";
 
 export const VIEW_TYPE_MATCH_TRACKER = "chronovault-match-tracker";
 
@@ -20,8 +20,8 @@ const EVEN_MARGIN = 0.05;
 /**
  * Log games and see how your decks do. With every deck: your decks, a deck ×
  * syndicate grid and the records against each syndicate and syndicate pair. With one
- * deck: that deck's page. Filters: period, patch, deck and the opponent's
- * syndicates ("Vs"). Games are kept in the match log note.
+ * deck: that deck's page. Filters: period, patch, deck, match type and the
+ * opponent's syndicates ("Vs"). Games are kept in the match log note.
  */
 export class MatchTrackerView extends ItemView {
 	private period: Period = "all";
@@ -29,11 +29,17 @@ export class MatchTrackerView extends ItemView {
 	private patchFilter = "";
 	/** LoggedGame.deckKey, or "" for all decks. */
 	private deckFilter = "";
+	/** Match.type, NO_TYPE for games without one, or "" for every type. */
+	private typeFilter = "";
+	/** LoggedGame.eventKey, or "" for every game. */
+	private eventFilter = "";
 	/** Opponent's syndicates to show games against: none = all, one = any game against it, two = that pair. */
 	private vs: Syndicate[] = [];
 	private showAllGames = false;
 	/** Deck preselected in the form (the note the tracker was opened from, or the last deck logged). */
 	private formDeck: TFile | null = null;
+	/** The type and event picked in the form (or of the last game logged from it), kept when the view is drawn again. */
+	private formPicks: Pick<Match, "type" | "event"> | null = null;
 	private body!: HTMLElement;
 	private refreshSoon = debounce(() => void this.render(), 300, true);
 
@@ -67,6 +73,14 @@ export class MatchTrackerView extends ItemView {
 		await this.render();
 	}
 
+	/** Show the games of a tournament report (every deck). */
+	focusEvent(report: TFile): void {
+		this.deckFilter = "";
+		this.formPicks = null;
+		this.eventFilter = report.path;
+		void this.render();
+	}
+
 	/** Show one deck's page, with the deck preselected in the form; null shows every deck. */
 	focusDeck(file: TFile | null): void {
 		this.formDeck = file;
@@ -78,7 +92,15 @@ export class MatchTrackerView extends ItemView {
 		const decks = this.plugin.deckNotes();
 		const { games: all, invalid } = await this.plugin.matchLog.games();
 		const patches = uniquePatches(all.map((g) => g.match.patch));
-		const games = all.filter((g) => this.inPeriod(g) && (!this.patchFilter || g.match.patch === this.patchFilter) && (!this.deckFilter || g.deckKey === this.deckFilter) && matchesVs(g.match.opponent, this.vs));
+		const games = all.filter(
+			(g) =>
+				this.inPeriod(g) &&
+				(!this.patchFilter || g.match.patch === this.patchFilter) &&
+				(!this.deckFilter || g.deckKey === this.deckFilter) &&
+				(!this.typeFilter || typeLabel(g.match) === this.typeFilter) &&
+				(!this.eventFilter || g.eventKey === this.eventFilter) &&
+				matchesVs(g.match.opponent, this.vs),
+		);
 
 		const scroll = this.body.scrollTop;
 		this.body.empty();
@@ -95,14 +117,19 @@ export class MatchTrackerView extends ItemView {
 		const entry = layout.createDiv({ cls: "chrono-tracker-card chrono-tracker-entry" });
 		entry.createEl("h3", { text: "Log a game" });
 		renderMatchForm(entry, {
+			...matchFormOptions(this.plugin, all),
 			decks,
 			deck: this.app.vault.getFileByPath(this.deckFilter) ?? this.formDeck ?? this.plugin.matchLog.lastDeck(all),
-			archetypes: uniqueArchetypes(all.map((g) => g.match.archetype)),
-			patches,
-			codeSyndicates: (code) => this.plugin.codeSyndicates(code),
-			initial: this.plugin.matchLog.defaults(all),
+			// Showing a tournament's games: the next one is played in it.
+			// Showing a tournament's games, the next one is played in it, until another type or event is picked.
+			initial: { ...newGameDefaults(this.plugin, all, this.eventFilter ? this.app.vault.getFileByPath(this.eventFilter) : null), ...this.formPicks },
+			onPick: (p) => {
+				this.formPicks = { type: p.type, event: p.event };
+				this.formDeck = p.deck;
+			},
 			onSubmit: async (file, match) => {
 				this.formDeck = file;
+				this.formPicks = { type: match.type, event: match.event };
 				await this.plugin.matchLog.add(file, match);
 			},
 		});
@@ -134,6 +161,14 @@ export class MatchTrackerView extends ItemView {
 
 		const split = main.createDiv({ cls: "chrono-tracker-split" });
 		this.renderSyndicates(split, games);
+		// By type: when some game has one, and every type is shown.
+		if (!this.typeFilter && games.some((g) => g.match.type)) {
+			renderRecordTable(
+				this.card(split, "By type"),
+				["Type"],
+				groupRecords(games, (g) => typeLabel(g.match), (g) => g.match).map((ty) => ({ label: (td) => void td.setText(ty.key), record: ty.record, onClick: () => this.apply(() => (this.typeFilter = ty.key)) })),
+			);
+		}
 		const archs = groupRecords(games, (g) => g.match.archetype, (g) => g.match);
 		if (archs.length) renderRecordTable(this.card(split, "By archetype"), ["Archetype"], archs.map((a) => ({ label: (td) => void td.setText(a.key), record: a.record })));
 		const byPatch = groupRecords(games, (g) => g.match.patch, (g) => g.match).sort((a, b) => comparePatches(a.key, b.key));
@@ -185,6 +220,32 @@ export class MatchTrackerView extends ItemView {
 		for (const g of all) if (!deckOptions.has(g.deckKey)) deckOptions.set(g.deckKey, g.deckName);
 		select("Deck", [["", "All decks"], ...Array.from(deckOptions).sort((a, b) => a[1].localeCompare(b[1]))], this.deckFilter, (v) => (this.deckFilter = v));
 
+		// Types of the settings, then those only found in the log, then games without one.
+		const types = this.plugin.settings.matchTypes.map((t) => t.name);
+		for (const g of all) if (g.match.type && !types.includes(g.match.type)) types.push(g.match.type);
+		if (this.typeFilter && this.typeFilter !== NO_TYPE && !types.includes(this.typeFilter)) types.push(this.typeFilter);
+		if (types.length || all.some((g) => g.match.type)) {
+			const options = types.map((t): [string, string] => [t, t]);
+			if (all.some((g) => !g.match.type) || this.typeFilter === NO_TYPE) options.push([NO_TYPE, NO_TYPE]);
+			select("Type", [["", "All types"], ...options], this.typeFilter, (v) => (this.typeFilter = v));
+		}
+
+		// Events: those of the games, newest first by date.
+		const events = new Map<string, { name: string; date: string }>();
+		for (const g of all) {
+			if (!g.eventKey) continue;
+			const e = events.get(g.eventKey);
+			if (!e) events.set(g.eventKey, { name: g.eventName, date: g.match.date });
+			else if (g.match.date > e.date) e.date = g.match.date;
+		}
+		if (this.eventFilter && !events.has(this.eventFilter)) events.set(this.eventFilter, { name: this.app.vault.getFileByPath(this.eventFilter)?.basename ?? this.eventFilter, date: "" });
+		if (events.size) {
+			const options = Array.from(events)
+				.sort((a, b) => b[1].date.localeCompare(a[1].date) || a[1].name.localeCompare(b[1].name))
+				.map(([key, e]): [string, string] => [key, e.name]);
+			select("Event", [["", "All events"], ...options], this.eventFilter, (v) => (this.eventFilter = v));
+		}
+
 		// Vs: the opponent's syndicates, picked like in the form (two at most).
 		const vs = filters.createDiv({ cls: "chrono-tracker-vs", attr: { role: "group", "aria-label": "Opponent's syndicates" } });
 		vs.createSpan({ cls: "chrono-match-hint", text: "Vs" });
@@ -195,12 +256,12 @@ export class MatchTrackerView extends ItemView {
 			b.addEventListener("click", () => this.apply(() => (this.vs = on ? this.vs.filter((x) => x !== s) : [...this.vs, s].slice(-2))));
 		}
 
-		if (this.deckFilter || this.vs.length || this.patchFilter || this.period !== "all") {
+		if (this.deckFilter || this.vs.length || this.patchFilter || this.typeFilter || this.eventFilter || this.period !== "all") {
 			const clear = filters.createEl("button", { text: "Clear filters" });
 			clear.addEventListener("click", () =>
 				this.apply(() => {
 					this.period = "all";
-					this.deckFilter = this.patchFilter = "";
+					this.deckFilter = this.patchFilter = this.typeFilter = this.eventFilter = "";
 					this.vs = [];
 				}),
 			);
@@ -367,7 +428,7 @@ export class MatchTrackerView extends ItemView {
 		const card = this.card(parent, shown.length < games.length ? `Games (last ${shown.length} of ${games.length})` : `Games (${games.length})`);
 		const list = card.createDiv({ cls: "chrono-match-list" });
 		for (const g of shown.slice().reverse()) {
-			const row = renderGameRow(this.plugin, list, g.match, this.deckFilter ? undefined : g.deckName);
+			const row = renderGameRow(this.plugin, list, g.match, { deck: this.deckFilter ? undefined : g.deckName, eventName: g.eventName, event: g.event });
 			const actions = row.createDiv({ cls: "chrono-match-actions" });
 			if (g.match.opponentDeck) {
 				const opp = actions.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Open the opponent's deck in the deck builder" } });

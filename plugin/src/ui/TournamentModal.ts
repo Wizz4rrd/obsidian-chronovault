@@ -1,9 +1,12 @@
 import { App, Modal, Setting, TFile } from "obsidian";
 import { MATCH_FORMATS, MatchFormat, parseDeckCodes } from "../data/tournament";
+import { today } from "../data/matches";
 import { Deck } from "../data/types";
 
 export interface TournamentOptions {
 	event: string;
+	/** YYYY-MM-DD: the report's date and the start of its name. */
+	date: string;
 	format: MatchFormat;
 	rounds: number;
 	/** Deck notes brought to the event, in list order. */
@@ -12,9 +15,13 @@ export interface TournamentOptions {
 	codeDecks: Deck[];
 }
 
-/** Event name, match format, number of rounds and the decks brought (several for Bo3/Bo5). */
+/** Above this many deck notes, the deck list gets a filter. */
+const FILTER_FROM = 8;
+
+/** Event name, date, match format, number of rounds and the decks brought (several for Bo3/Bo5). */
 export class TournamentModal extends Modal {
 	private event = "";
+	private date = today();
 	private format: MatchFormat = "Bo3";
 	private rounds = 3;
 	private picked: Set<TFile>;
@@ -41,37 +48,55 @@ export class TournamentModal extends Modal {
 			});
 			window.setTimeout(() => t.inputEl.focus(), 0);
 		});
+		new Setting(contentEl).setName("Date").addText((t) => {
+			t.inputEl.type = "date";
+			t.setValue(this.date).onChange((v) => (this.date = v));
+		});
 		new Setting(contentEl)
 			.setName("Format")
-			.setDesc("Games per match: a row is added for each one.")
+			.setDesc("Games per match: decides who wins each round.")
 			.addDropdown((d) => {
 				for (const f of MATCH_FORMATS) d.addOption(f, f === "Bo1" ? "Best of 1" : f === "Bo3" ? "Best of 3" : "Best of 5");
 				d.setValue(this.format).onChange((v) => (this.format = v as MatchFormat));
 			});
-		new Setting(contentEl).setName("Rounds").addSlider((s) =>
+		new Setting(contentEl).setName("Rounds").setDesc("Planned rounds: the ones not played yet show as empty rows.").addSlider((s) =>
 			s
 				.setLimits(1, 12, 1)
 				.setValue(this.rounds)
 				.onChange((v) => (this.rounds = v)),
 		);
 
-		new Setting(contentEl).setName("Decks").setHeading();
+		const heading = new Setting(contentEl).setName("Decks").setHeading();
+		const count = heading.nameEl.createSpan({ cls: "chrono-tournament-count" });
+		const syncCount = () => count.setText(this.picked.size ? ` · ${this.picked.size} picked` : "");
+		syncCount();
 		if (!this.deckNotes.length) {
 			contentEl.createEl("p", { cls: "setting-item-description", text: "No deck notes in the notes folder yet: paste deck codes below, or add the decks later." });
 		}
+		// With many decks, a filter; the list scrolls on its own, so the buttons stay in view.
+		const rows: Array<{ file: TFile; el: HTMLElement }> = [];
+		if (this.deckNotes.length > FILTER_FROM) {
+			const filter = contentEl.createEl("input", { type: "search", cls: "chrono-tournament-filter", attr: { placeholder: "Filter decks", "aria-label": "Filter decks" } });
+			filter.addEventListener("input", () => {
+				const q = filter.value.trim().toLowerCase();
+				for (const r of rows) r.el.toggle(!q || r.file.basename.toLowerCase().includes(q));
+			});
+		}
 		const list = contentEl.createDiv({ cls: "chrono-tournament-decks" });
 		for (const file of this.deckNotes) {
-			new Setting(list).setName(file.basename).addToggle((t) =>
+			const setting = new Setting(list).setName(file.basename).addToggle((t) =>
 				t.setValue(this.picked.has(file)).onChange((on) => {
 					if (on) this.picked.add(file);
 					else this.picked.delete(file);
+					syncCount();
 				}),
 			);
+			rows.push({ file, el: setting.settingEl });
 		}
 
 		new Setting(contentEl)
 			.setName("Deck codes")
-			.setDesc("For decks you don't have a note for: paste their codes, one per line.")
+			.setDesc("For decks you don't have a note for: paste their codes, one per line. Each gets a deck note, so you can log its games.")
 			.addTextArea((t) => {
 				t.setPlaceholder("Deck code\nDeck code").onChange((v) => {
 					this.codes = v;
@@ -96,6 +121,7 @@ export class TournamentModal extends Modal {
 		this.close();
 		this.onSubmit({
 			event: this.event.trim() || "Tournament",
+			date: this.date || today(),
 			format: this.format,
 			rounds: this.rounds,
 			decks: this.deckNotes.filter((f) => this.picked.has(f)),

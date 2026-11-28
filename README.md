@@ -17,8 +17,8 @@ You can contact me on the Chrono Discord or by DM: Wizz4rrd#5948
 - Decks: a `chrono-deck` block takes a deck code, a simple list or YAML (examples below). It checks the deck against the [rules](https://playchrono.com/rules) (2 Divers, 40 cards, max 3 copies, only your Divers' syndicates), shows the energy curve and the type/syndicate split, and has buttons to copy the code, export the deck or open it in the builder.
 - Deck builder: opens in its own tab. Filter the card pool (you can show only the cards your Divers can play), add/remove cards, and save the deck back to the note it came from or to a new note. Saving a deck note also updates its properties and adds what changed to its "Changelog" section. While building you can go past the limits (more than 40 cards, more than 3 copies, cards outside your Divers' syndicates): the deck shows as not legal, and saving asks first.
 - Card browser: a page or a sidebar pane with filters for cost (click one or more, 0 to 7+), syndicate, spell speed, rarity, type, keyword and set. The deck builder has the same cost filter. Click a card to insert it, add it to the builder or see the details.
-- Match tracker: log your games (deck, the opponent's syndicates, optionally archetype, patch, the opponent's deck code and a note) and see your win rates per deck, per syndicate and per syndicate pair, a matchup grid, and a chart per week. Games are saved in a note, as a table you can also edit by hand.
-- Templates for deck notes and tournament reports (with several decks and Bo1/Bo3/Bo5 rounds). The frontmatter works with Dataview. You can replace them with your own.
+- Match tracker: log your games (deck, type such as ladder, scrim or tournament, the opponent's syndicates, optionally archetype, patch, the opponent's deck code and a note) and see your win rates per deck, per syndicate and per syndicate pair, a matchup grid, and a chart per week. Games are saved in a note, as a table you can also edit by hand.
+- Templates for deck notes and tournament reports (several decks, Bo1/Bo3/Bo5, rounds filled in live from the games you log). The frontmatter works with Dataview. You can replace them with your own.
 
 Deck codes work both ways with the game and with deck sites that use the same format.
 
@@ -75,7 +75,7 @@ cards:
 | Insert inline card reference… / Insert card image block… | |
 | Look up a card… | |
 | New deck note | Also opens the deck builder, linked to the new note |
-| New tournament report | Asks for the event, the format (Bo1, Bo3, Bo5), the number of rounds and the decks you bring: any number of deck notes (from the notes folder), plus deck codes (one per line) for decks you have no note for |
+| New tournament report | Asks for the event, the date (today by default; it starts the note's name), the format (Bo1, Bo3, Bo5), the number of rounds and the decks you bring: any number of deck notes (from the notes folder), plus deck codes (one per line) for decks you have no note for, which get a deck note (or use the one with their name) |
 | Open match tracker | Also in the ribbon (trophy). From a deck note, opens that deck's page |
 | Record match result… | Logs a game without opening the tracker. From a deck note, that deck is picked |
 | Open match log note | The note the games are saved in |
@@ -88,16 +88,34 @@ New notes go in `ChronoCCG/Decks` and `ChronoCCG/Tournaments` (you can change th
 
 In a deck note (`type: chrono-deck`), the `deck`, `syndicates`, `divers` and `code` properties describe the first `chrono-deck` block. Saving from the deck builder updates them. If you edit the block by hand, the block shows "Note properties are out of date" with an Update button (or run "Update deck note properties"). Properties your template doesn't have are left alone.
 
-Saving a deck note from the deck builder also adds a line to its "Changelog" section, e.g. ``- 2026-11-14 — Diver `chrono:Agent of Stability` → `chrono:Leeflo Mentor`, +2 `chrono:Bloom`, −1 `chrono:Throwdown` ``. Saves on the same day are merged into one line. Notes without a "Changelog" heading are left alone, and you can turn this off in the settings ("Log deck changes"). To edit the templates, click "Write templates" in the settings (Notes → Default templates) and change the files it creates. Placeholders: `{{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}`, and in tournament reports `{{event}} {{format}} {{decks}}` (for the `decks` property) `{{deckLinks}} {{decklists}} {{rounds}}`. A tournament report has a section per round with a row per game, to note which of your decks you played.
+Saving a deck note from the deck builder also adds a line to its "Changelog" section, e.g. ``- 2026-11-14 — Diver `chrono:Agent of Stability` → `chrono:Leeflo Mentor`, +2 `chrono:Bloom`, −1 `chrono:Throwdown` ``. Saves on the same day are merged into one line. Notes without a "Changelog" heading are left alone, and you can turn this off in the settings ("Log deck changes"). To edit the templates, click "Write templates" in the settings (Notes → Default templates) and change the files it creates. Placeholders: `{{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}`, and in tournament reports `{{event}} {{format}} {{roundCount}}` (the planned rounds) `{{decks}}` (for the `decks` property) `{{deckLinks}} {{decklists}} {{rounds}}` (a `chrono-matches` block: the rounds, live).
+
+#### Tournament reports
+
+A report is the event's page; its games are in the match log, like every other game. The plugin reads the report's properties and never edits its body, so you can change the template or the note freely:
+
+| Property | What it's for |
+| --- | --- |
+| `type: chrono-tournament` | Makes the note a report (listed as an event in the match form) |
+| `event`, `date` | Its name, and its place in the list (newest first) |
+| `format` | Bo1, Bo3 or Bo5: who wins a round. Without it, rounds count as Bo1 |
+| `rounds` | The planned rounds, shown as "not played yet" until you log them |
+| `decks` | The decks you brought: the match form only offers those for this event (`deck` in older reports works too) |
+| `record` | The match record (e.g. `3-1`). The plugin keeps it up to date from the match log, for reports with games in it |
+| `placement` | Yours to fill in |
+
+Its "Rounds" section is a `chrono-matches` block: the match and game records, then a row per round with the opponent (name and syndicates), your deck, the games, the result and the games' notes. Its "Log a game" button (or "Record match result" while the report is open) presets a tournament type, the event and the round. Reports made before this version keep their tables; add a `chrono-matches` block (and `rounds`) to see them live.
 
 ### Match tracker
 
 ![The match tracker](docs/screenshots/match-tracker.png)
 
-Games go in one note, `ChronoCCG/Match log.md` by default (you can change it in the settings), as a table with a row per game: date, patch, deck (a link to the deck note), result (W or L), the opponent's syndicates, archetype, the opponent's deck code and a note. You can edit it by hand, and columns are found by their name, so you can reorder them or add your own. Deck links show the deck's name (`[[Decks/Egg Novice|Egg Novice]]`), you can turn that off in the settings ("Deck names in the match log"). In the note, `` `chrono:Hush Now` `` works like anywhere else, and the tracker's game list shows it as a card reference too.
+Games go in one note, `ChronoCCG/Match log.md` by default (you can change it in the settings), as a table with a row per game: date, patch, deck (a link to the deck note), result (W or L), the opponent's syndicates, archetype, the opponent's deck code, type and a note. Tournament games also have an event (a link to the tournament report), a round and the opponent's name (Player); those three columns are added with the first tournament game. You can edit it by hand, and columns are found by their name, so you can reorder them or add your own. Deck links show the deck's name (`[[Decks/Egg Novice|Egg Novice]]`), you can turn that off in the settings ("Deck names in the match log"). In the note, `` `chrono:Hush Now` `` works like anywhere else, and the tracker's game list shows it as a card reference too.
 
 In the tracker:
-- Filters: period, patch, deck, and "Vs": pick one syndicate for every game against it (whatever the other one was), or two for that pair.
+- Filters: period, patch, deck, type, event (once you have tournament games), and "Vs": pick one syndicate for every game against it (whatever the other one was), or two for that pair.
+- Types: the form has a Type dropdown. You set the types in the settings (Match types: Ladder, Scrim and Tournament to start with), where you can add, rename, reorder and delete them. Renaming a type doesn't change the games already logged. A new game starts with the type of your last game, and games logged before types existed have none ("No type" in the filter). The "By type" table shows your record per type.
+- Tournament games: for a type marked "Tournament" in the settings, the form also asks for the event (one of your tournament reports, newest first), the round and the opponent's name, and the deck list shows the report's decks. The round is suggested from the games already logged for that event and the report's format: the same round while the match is still going (e.g. 1–1 in a Bo3), else the next one. Next to it the form says where that round stands ("Round 3 of 5: 1–1 so far"), and the opponent's name is filled in from the round's earlier games. From anywhere but a report, the event is the one of your last game.
 - With all decks: your decks, the matchup grid (your decks × the six syndicates, plus all decks together), and your record against each syndicate and each syndicate pair. Click a deck, a row or a cell to narrow it down.
 - With one deck: that deck's page.
 - The archetype is free text. It suggests the archetypes you used before, and typing one in another case ("aggro") keeps the spelling you used first, so it isn't counted twice.
@@ -107,7 +125,7 @@ In the tracker:
 
 Colours in the matchup grid: red is a win rate under 45%, grey is 45–55% (about even), green is over 55%. The further from 50%, the stronger the colour. A faded cell (or a faded row in the tables) has fewer than 3 games, so the win rate doesn't say much yet. The win-rate bars go red under 40%, light red 40–50%, light green 50–60% and green from 60%.
 
-A `chrono-matches` block (with nothing in it) shows a deck's results in its note: win rate, record, last 10 games and the record against each syndicate pair (most played first), with buttons to log a game and open the tracker. New deck notes have one in their "Results" section. Anywhere else (e.g. the match log) it shows every game.
+A `chrono-matches` block (with nothing in it) shows a deck's results in its note: win rate, record, last 10 games and the record against each syndicate pair (most played first), with buttons to log a game and open the tracker. New deck notes have one in their "Results" section. In a tournament report, it shows that event's rounds (see [Tournament reports](#tournament-reports)). Anywhere else (e.g. the match log) it shows every game. Add a line like `type: Ladder, Scrim` in the block to count only those types (`type: No type` for games without one).
 
 ![A deck note with its Results section](docs/screenshots/deck-note.png)
 
@@ -133,11 +151,11 @@ The plugin only goes online to get the card list, the card images and the six sy
 | The first time a syndicate icon is shown | Downloads the icon (about 3 KB) | `playchrono.com` |
 | If you set a custom data URL | Downloads the card list | Your URL |
 
-The card list (`card-cache.json`) is saved in the plugin folder. The images and icons are saved in a `ChronoVault` folder in your attachment folder (Settings → Files and links), so they sync with the vault and devices with their own config folder share them. You can keep them in the plugin folder instead (`image-cache/`, setting "Card image folder"); changing it moves the saved images. Desktop saves WebP and iPad/iPhone PNG (iOS can't save WebP); each device also uses the other's. Desktop converts the PNGs it finds to WebP (about 8× smaller), and when an image is saved in both, the PNG is deleted. Each image is only downloaded once and everything you've already seen works offline. Saved images are shrunk to 400px wide WebP (about 35 KB each, roughly 14 MB for all 390 deck-legal cards). To have every card offline at once, use "Download all card images" in the settings: it downloads the missing ones (a few at a time, you can cancel) and saves the same 400px copies. You can clear the saved images in the settings, or turn off saving them: that deletes them too (after asking), and the full-size image is then loaded every time. Set the auto-refresh interval to `0` to turn off the automatic download. If you pick the "Bundled" source it never downloads anything (syndicate icons are replaced by plain icons), but you only get a placeholder card.
+The card list (`card-cache.json`) is saved in the plugin folder. The images and icons are saved in a `ChronoVault` folder in your attachment folder (Settings → Files and links), so they sync with the vault and devices with their own config folder share them. You can keep them in the plugin folder instead (`image-cache/`, setting "Card image folder"); changing it moves the saved images. Desktop saves WebP and iPad/iPhone PNG (iOS can't save WebP); each device also uses the other's. Desktop converts the PNGs it finds to WebP (about 8× smaller), and when an image is saved in both, the PNG is deleted. Each image is only downloaded once and everything you've already seen works offline. Saved images are shrunk to 400px wide WebP (about 35 KB each, roughly 14 MB for all 390 deck-legal cards). To have every card offline at once, use "Download all card images" in the settings (it counts the cards and the syndicate icons apart, e.g. "All 390 cards and 6 syndicate icons are saved"): it downloads the missing ones (a few at a time, you can cancel) and saves the same 400px copies. You can clear the saved images in the settings, or turn off saving them: that deletes them too (after asking), and the full-size image is then loaded every time. Set the auto-refresh interval to `0` to turn off the automatic download. If you pick the "Bundled" source it never downloads anything (syndicate icons are replaced by plain icons), but you only get a placeholder card.
 
 ## Privacy and permissions
 
-- **Vault:** the plugin reads the notes it renders and the deck notes in its notes folder (for the tournament report and match tracker deck lists) and the match log, and writes only the notes you create or save from it (including the match log), plus its own folder (`card-cache.json`, settings) and the folder for card images (`ChronoVault` in the attachment folder, or `image-cache/` in its own folder). It doesn't scan the rest of your vault.
+- **Vault:** the plugin reads the notes it renders and the deck notes and tournament reports in its notes folder (for the tournament report and match tracker deck and event lists) and the match log, and writes only the notes you create or save from it (including the match log) and the `record` property of tournament reports, plus its own folder (`card-cache.json`, settings) and the folder for card images (`ChronoVault` in the attachment folder, or `image-cache/` in its own folder). It doesn't scan the rest of your vault.
 - **Clipboard:** it only writes to the clipboard when you click a copy button or command (deck code, export, inline card reference). It never reads the clipboard.
 - **Release files:** `main.js`, `manifest.json` and `styles.css` of each release are built by GitHub Actions from this repository and come with a [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations). Check a download with `gh attestation verify main.js --repo Wizz4rrd/obsidian-chronovault`.
 

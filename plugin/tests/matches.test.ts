@@ -4,9 +4,14 @@ import {
 	addLogRow,
 	comparePatches,
 	currentStreak,
-	deckCellLabel,
-	deckLinkTarget,
+	cellLabel,
+	extraColumns,
 	formatLogRow,
+	linkTarget,
+	parseRound,
+	parseTypes,
+	typeLabel,
+	rewriteLogRow,
 	groupRecords,
 	matchesVs,
 	weekOf,
@@ -16,17 +21,17 @@ import {
 	Match,
 	pairingLabel,
 	parseLog,
-	replaceLogRow,
 	tableCells,
 	tally,
 	upgradeLog,
 	winRate,
 } from "../src/data/matches";
+import { eventRecord, matchRecord, nextRound, parseFormat, reportInfo, roundResults, roundStatus } from "../src/data/tournament";
 
 /** The columns of a log written before Patch and Opponent deck existed; "Turn" was dropped since, and is left alone. */
 const OLD_COLUMNS = ["Date", "Deck", "Result", "Opponent", "Archetype", "Turn", "Note"];
 const log = (...rows: string[]) => `# Match log\n\n${logTableHeader(OLD_COLUMNS)}\n${rows.join("\n")}\n`;
-const game = (m: Partial<Match>): Match => ({ date: "", patch: "", result: "W", opponent: [], archetype: "", opponentDeck: "", note: "", ...m });
+const game = (m: Partial<Match>): Match => ({ date: "", patch: "", result: "W", opponent: [], archetype: "", opponentDeck: "", type: "", event: "", round: null, player: "", note: "", ...m });
 
 test("log rows are parsed leniently, header and separator skipped", () => {
 	const { rows, invalid } = parseLog(
@@ -45,7 +50,7 @@ test("log rows are parsed leniently, header and separator skipped", () => {
 
 test("rows round-trip, with pipes escaped", () => {
 	const row = formatLogRow("[[Decks/Somnus Revive|Somnus]]", game({ date: "2026-11-15", patch: "0.11.1", result: "L", opponent: ["Silence"], opponentDeck: "AUGVG33N", note: "a | b" }));
-	assert.equal(row, "| 2026-11-15 | 0.11.1 | [[Decks/Somnus Revive\\|Somnus]] | L | Silence |  | AUGVG33N | a \\| b |");
+	assert.equal(row, "| 2026-11-15 | 0.11.1 | [[Decks/Somnus Revive\\|Somnus]] | L | Silence |  | AUGVG33N |  | a \\| b |");
 	const [parsed] = parseLog(`${logTableHeader()}\n${row}`).rows;
 	assert.equal(parsed.match.patch, "0.11.1");
 	assert.equal(parsed.match.opponentDeck, "AUGVG33N");
@@ -56,24 +61,24 @@ test("rows round-trip, with pipes escaped", () => {
 });
 
 test("deck cells: link target and label", () => {
-	assert.equal(deckLinkTarget("[[Decks/Somnus Revive|Somnus]]"), "Decks/Somnus Revive");
-	assert.equal(deckLinkTarget("[[Egg Novice#Matchups]]"), "Egg Novice");
-	assert.equal(deckLinkTarget("Egg Novice"), null);
-	assert.equal(deckCellLabel("[[Decks/Somnus Revive|Somnus]]"), "Somnus");
-	assert.equal(deckCellLabel("[[Decks/Somnus Revive]]"), "Somnus Revive");
-	assert.equal(deckCellLabel("Egg Novice"), "Egg Novice");
+	assert.equal(linkTarget("[[Decks/Somnus Revive|Somnus]]"), "Decks/Somnus Revive");
+	assert.equal(linkTarget("[[Egg Novice#Matchups]]"), "Egg Novice");
+	assert.equal(linkTarget("Egg Novice"), null);
+	assert.equal(cellLabel("[[Decks/Somnus Revive|Somnus]]"), "Somnus");
+	assert.equal(cellLabel("[[Decks/Somnus Revive]]"), "Somnus Revive");
+	assert.equal(cellLabel("Egg Novice"), "Egg Novice");
 	// Markdown links, for vaults with "Use [[Wikilinks]]" off.
-	assert.equal(deckLinkTarget("[Somnus Revive](Decks/Somnus%20Revive.md)"), "Decks/Somnus Revive");
-	assert.equal(deckLinkTarget("[Somnus](<../Decks/Somnus Revive.md#Matchups>)"), "../Decks/Somnus Revive");
-	assert.equal(deckCellLabel("[Somnus](Decks/Somnus%20Revive.md)"), "Somnus");
+	assert.equal(linkTarget("[Somnus Revive](Decks/Somnus%20Revive.md)"), "Decks/Somnus Revive");
+	assert.equal(linkTarget("[Somnus](<../Decks/Somnus Revive.md#Matchups>)"), "../Decks/Somnus Revive");
+	assert.equal(cellLabel("[Somnus](Decks/Somnus%20Revive.md)"), "Somnus");
 });
 
 test("columns are read by header, and an old log gets the new ones", () => {
 	const old = log("| 2026-11-01 | [[A]] | W | Silence | Aggro | play | gg |");
 	assert.deepEqual(logColumns(old), OLD_COLUMNS);
 	const upgraded = upgradeLog(old);
-	assert.deepEqual(logColumns(upgraded), ["Date", "Deck", "Result", "Opponent", "Archetype", "Turn", "Patch", "Opponent deck", "Note"]);
-	assert.ok(upgraded.includes("| 2026-11-01 | [[A]] | W | Silence | Aggro | play |  |  | gg |"));
+	assert.deepEqual(logColumns(upgraded), ["Date", "Deck", "Result", "Opponent", "Archetype", "Turn", "Patch", "Opponent deck", "Type", "Note"]);
+	assert.ok(upgraded.includes("| 2026-11-01 | [[A]] | W | Silence | Aggro | play |  |  |  | gg |"));
 	assert.deepEqual(parseLog(upgraded).rows[0].match, parseLog(old).rows[0].match);
 	assert.equal(upgradeLog(upgraded), upgraded);
 	// Reordered and extra columns: rows follow the header, unknown cells are kept on edit.
@@ -100,9 +105,73 @@ test("rows are added to the table, which is created when missing", () => {
 
 test("rows are replaced and removed by their text", () => {
 	const text = log("| 1 | [[A]] | W |", "| 2 | [[A]] | L |");
-	assert.deepEqual(parseLog(replaceLogRow(text, "| 1 | [[A]] | W |", "| 1 | [[A]] | L |")!).rows.map((r) => r.match.result), ["L", "L"]);
-	assert.deepEqual(parseLog(replaceLogRow(text, "| 2 | [[A]] | L |", null)!).rows.map((r) => r.match.date), ["1"]);
-	assert.equal(replaceLogRow(text, "| 3 | [[A]] | W |", null), null);
+	const flip = (columns: string[], previous: string) => formatLogRow("[[A]]", { ...parseLog(`${logTableHeader(columns)}\n${previous}`).rows[0].match, result: "L" }, columns, previous);
+	assert.deepEqual(parseLog(rewriteLogRow(text, "| 1 | [[A]] | W |", flip)!).rows.map((r) => r.match.result), ["L", "L"]);
+	assert.deepEqual(parseLog(rewriteLogRow(text, "| 2 | [[A]] | L |", null)!).rows.map((r) => r.match.date), ["1"]);
+	assert.equal(rewriteLogRow(text, "| 3 | [[A]] | W |", null), null);
+});
+
+test("type, event and round: the event columns come with the first tournament game", () => {
+	assert.deepEqual([parseRound("2"), parseRound("R3"), parseRound("round 4"), parseRound(""), parseRound("0"), parseRound("x")], [2, 3, 4, null, null, null]);
+	const ladder = game({ date: "2026-11-20", type: "Ladder" });
+	assert.deepEqual(extraColumns(ladder), []);
+	const text = addLogRow("", formatLogRow("[[A]]", ladder));
+	assert.ok(!logColumns(text).includes("Event"));
+	const cup = game({ date: "2026-11-21", type: "Tournament", event: "[[Tournaments/2026-11-21 Cup|2026-11-21 Cup]]", round: 2, player: "Player F" });
+	const upgraded = upgradeLog(text, extraColumns(cup));
+	assert.deepEqual(logColumns(upgraded), ["Date", "Patch", "Deck", "Result", "Opponent", "Archetype", "Opponent deck", "Type", "Event", "Round", "Player", "Note"]);
+	const added = addLogRow(upgraded, formatLogRow("[[A]]", cup, logColumns(upgraded)));
+	assert.deepEqual(
+		parseLog(added).rows.map((r) => r.match),
+		[ladder, cup],
+	);
+	// Editing the ladder game into a tournament one, in a log without the event columns yet.
+	const raw = parseLog(text).rows[0].raw;
+	const edited = rewriteLogRow(text, raw, (columns, previous) => formatLogRow("[[A]]", cup, columns, previous), extraColumns(cup))!;
+	assert.deepEqual(parseLog(edited).rows[0].match, cup);
+});
+
+test("a block's type line", () => {
+	assert.deepEqual(parseTypes(""), []);
+	assert.deepEqual(parseTypes("type: Ladder, Scrim"), ["ladder", "scrim"]);
+	assert.deepEqual(parseTypes("Types:  no type ,"), ["no type"]);
+	assert.equal(typeLabel(game({})), "No type");
+});
+
+test("tournament rounds: match results and the next round", () => {
+	assert.equal(parseFormat("bo3"), "Bo3");
+	assert.equal(parseFormat("best of 3"), null);
+	const games = [game({ round: 1 }), game({ round: 1, result: "L" }), game({ round: 1 }), game({ round: 2, result: "L" })];
+	const rounds = roundResults(games, "Bo3");
+	assert.deepEqual(
+		rounds.map((r) => [r.round, r.result, r.record.wins, r.record.losses]),
+		[
+			[1, "W", 2, 1],
+			[2, null, 0, 1],
+		],
+	);
+	assert.deepEqual(matchRecord(rounds), { wins: 1, losses: 0, games: 1 });
+	assert.equal(nextRound(games, "Bo3"), 2);
+	assert.equal(nextRound([...games, game({ round: 2, result: "L" })], "Bo3"), 3);
+	assert.equal(nextRound(games, "Bo1"), 3);
+	// Without a format every game is its own round; without games it's round 1.
+	assert.equal(nextRound(games, null), 3);
+	assert.equal(nextRound([], "Bo3"), 1);
+	assert.deepEqual(roundResults(games, null).map((r) => r.result), [null, null]);
+	// What the form says about a round, and the report's record.
+	assert.equal(roundStatus(games, "Bo3", 1), "Won 2–1, finished");
+	assert.equal(roundStatus(games, "Bo3", 2), "0–1 so far");
+	assert.equal(roundStatus(games, "Bo3", 3), "New round");
+	assert.equal(eventRecord(games, "Bo3"), "1-0");
+	assert.equal(eventRecord(games, null), "1-1");
+	assert.equal(eventRecord([], "Bo3"), "0-0");
+});
+
+test("a report's properties", () => {
+	assert.deepEqual(reportInfo({ format: "Bo3", rounds: 5, decks: ["[[Somnus Revive]]", "Dino Swoop", ""] }), { format: "Bo3", rounds: 5, decks: ["[[Somnus Revive]]", "Dino Swoop"] });
+	// Older reports have one `deck`; missing or odd values are left out.
+	assert.deepEqual(reportInfo({ deck: "[[Somnus Revive]]", rounds: "x" }), { format: null, rounds: null, decks: ["[[Somnus Revive]]"] });
+	assert.deepEqual(reportInfo(null), { format: null, rounds: null, decks: [] });
 });
 
 test("records, win rate, groups and streak", () => {

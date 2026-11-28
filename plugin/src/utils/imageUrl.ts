@@ -42,8 +42,12 @@ export function cardImageUrls(cards: readonly Card[], settings: ChronoSettings):
  * What "Download all" saves: every card image, plus the syndicate icons so they
  * also show offline (not with the "Bundled" source, which shows built-in icons).
  */
-export function imageUrlsToSave(cards: readonly Card[], settings: ChronoSettings): string[] {
+export function imagesToSave(cards: readonly Card[], settings: ChronoSettings): { cards: string[]; icons: string[] } {
 	const urls = cardImageUrls(cards, settings);
-	if (!urls.length || !imageCache.online) return urls;
-	return [...urls, ...SYNDICATES.map(syndicateIconUrl)];
+	return { cards: urls, icons: urls.length && imageCache.online ? SYNDICATES.map(syndicateIconUrl) : [] };
+}
+
+export function imageUrlsToSave(cards: readonly Card[], settings: ChronoSettings): string[] {
+	const { cards: urls, icons } = imagesToSave(cards, settings);
+	return [...urls, ...icons];
 }

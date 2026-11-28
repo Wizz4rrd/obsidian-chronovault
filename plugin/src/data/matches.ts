@@ -4,18 +4,21 @@ import { Syndicate, SYNDICATES } from "./types";
  * The match log: one note with a Markdown table, one row per game, written by
  * the match tracker and editable by hand.
  *
- *   | Date | Patch | Deck | Result | Opponent | Archetype | Opponent deck | Note |
- *   | --- | --- | --- | --- | --- | --- | --- | --- |
- *   | 2026-11-15 | 0.11.1 | [[Somnus Revive]] | W | Sungrace Silence | Eggs | AUGVG33… | topdecked lethal |
+ *   | Date | Patch | Deck | Result | Opponent | Archetype | Opponent deck | Type | Note |
+ *   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+ *   | 2026-11-15 | 0.11.1 | [[Somnus Revive]] | W | Sungrace Silence | Eggs | AUGVG33… | Ladder | topdecked lethal |
  *
  * Columns are found by their header, so they can be reordered, and a log
  * written before a column existed still reads (it gets the column on the next
  * write). Columns it doesn't know (e.g. an old "Turn" or "Style") are kept as they are.
  * Only the result is required. Chrono games can't end in a draw.
  */
-export const LOG_COLUMNS = ["Date", "Patch", "Deck", "Result", "Opponent", "Archetype", "Opponent deck", "Note"];
+export const LOG_COLUMNS = ["Date", "Patch", "Deck", "Result", "Opponent", "Archetype", "Opponent deck", "Type", "Note"];
 
-type Field = "date" | "patch" | "deck" | "result" | "opponent" | "archetype" | "opponentDeck" | "note";
+/** Columns of tournament games (the report, the round and the opponent's name), added to the table with the first game that has them. */
+export const EVENT_COLUMNS = ["Event", "Round", "Player"];
+
+type Field = "date" | "patch" | "deck" | "result" | "opponent" | "archetype" | "opponentDeck" | "type" | "event" | "round" | "player" | "note";
 
 const FIELD_NAMES: Record<Field, string[]> = {
 	date: ["date"],
@@ -25,6 +28,10 @@ const FIELD_NAMES: Record<Field, string[]> = {
 	opponent: ["opponent", "vs"],
 	archetype: ["archetype"],
 	opponentDeck: ["opponent deck", "opp. deck", "opp deck", "opponent deck code"],
+	type: ["type", "game type", "mode"],
+	event: ["event", "tournament"],
+	round: ["round"],
+	player: ["player", "opponent player", "opponent name"],
 	note: ["note", "notes"],
 };
 
@@ -47,6 +54,14 @@ export interface Match {
 	archetype: string;
 	/** Opponent's deck code, or "". */
 	opponentDeck: string;
+	/** Kind of game, e.g. "Ladder" (see the "Match types" setting), or "". */
+	type: string;
+	/** Tournament report the game was played in, as the cell is written (usually a link), or "". */
+	event: string;
+	/** Round of the tournament, from 1; null when not noted. */
+	round: number | null;
+	/** The opponent's name, for tournament games, or "". */
+	player: string;
 	note: string;
 }
 
@@ -69,6 +84,13 @@ export function parseResult(text: string): MatchResult | null {
 	if (/^(w|win|won|victory)$/.test(t)) return "W";
 	if (/^(l|loss|lose|lost|defeat)$/.test(t)) return "L";
 	return null;
+}
+
+/** "2", "R2" or "Round 2" → 2; null for anything else. */
+export function parseRound(text: string): number | null {
+	const m = /^(?:r(?:ound)?\s*)?(\d+)$/i.exec(text.trim());
+	const n = m ? Number(m[1]) : 0;
+	return n > 0 ? n : null;
 }
 
 export function parseSyndicates(text: string): Syndicate[] {
@@ -140,6 +162,10 @@ export function parseLog(text: string): { rows: LogRow[]; invalid: number[] } {
 				opponent: parseSyndicates(get("opponent")),
 				archetype: get("archetype"),
 				opponentDeck: get("opponentDeck").replace(/\s+/g, ""),
+				type: get("type"),
+				event: get("event"),
+				round: parseRound(get("round")),
+				player: get("player"),
 				note: get("note"),
 			},
 		});
@@ -165,6 +191,10 @@ export function formatLogRow(deck: string, m: Match, columns: string[] = LOG_COL
 		opponent: m.opponent.join(" "),
 		archetype: m.archetype,
 		opponentDeck: m.opponentDeck,
+		type: m.type,
+		event: m.event,
+		round: m.round ? String(m.round) : "",
+		player: m.player,
 		note: m.note,
 	};
 	const cells = columns.map((c, i) => {
@@ -183,16 +213,22 @@ export function logColumns(text: string): string[] {
 	return findHeader(text.split("\n"))?.columns ?? LOG_COLUMNS;
 }
 
+/** The columns `m` needs beyond LOG_COLUMNS: the event ones for a tournament game. */
+export function extraColumns(m: Match): string[] {
+	return m.event || m.round || m.player ? EVENT_COLUMNS : [];
+}
+
 /**
- * `text` with the columns of LOG_COLUMNS its table lacks added (before Note,
- * else at the end), every row padded to match. Unchanged when nothing is missing.
+ * `text` with the columns of LOG_COLUMNS (and `extra`) its table lacks added
+ * (before Note, else at the end), every row padded to match. Keeps the number
+ * of lines. Unchanged when nothing is missing.
  */
-export function upgradeLog(text: string): string {
+export function upgradeLog(text: string, extra: string[] = []): string {
 	const lines = text.split("\n");
 	const header = findHeader(lines);
 	if (!header) return text;
 	const have = header.columns.map(fieldOf);
-	const missing = LOG_COLUMNS.filter((c) => !have.includes(fieldOf(c)));
+	const missing = [...LOG_COLUMNS, ...extra].filter((c) => !have.includes(fieldOf(c)));
 	if (!missing.length) return text;
 	const noteAt = have.indexOf("note");
 	const at = noteAt >= 0 ? noteAt : have.length;
@@ -223,18 +259,24 @@ export function addLogRow(text: string, row: string): string {
 	return `${before ? `${before}\n\n` : ""}${logTableHeader()}\n${row}\n`;
 }
 
-/** `text` with the line `raw` replaced by `next` (or removed when `next` is null); null when the line is gone. */
-export function replaceLogRow(text: string, raw: string, next: string | null): string | null {
-	const lines = text.split("\n");
-	const i = lines.indexOf(raw);
+/**
+ * `text` with the line `raw` replaced by `next` (or removed when `next` is null),
+ * the table first given its missing columns (and `extra`); null when the line is gone.
+ * `next` gets the table's columns and the row as upgraded, whose unknown cells it keeps.
+ */
+export function rewriteLogRow(text: string, raw: string, next: ((columns: string[], previous: string) => string) | null, extra: string[] = []): string | null {
+	const i = text.split("\n").indexOf(raw);
 	if (i < 0) return null;
+	const upgraded = upgradeLog(text, extra);
+	// upgradeLog keeps the lines in place, so the row is still line i.
+	const lines = upgraded.split("\n");
 	if (next === null) lines.splice(i, 1);
-	else lines[i] = next;
+	else lines[i] = next(logColumns(upgraded), lines[i]);
 	return lines.join("\n");
 }
 
-/** A deck cell's link: target and shown text, for wikilinks and Markdown links; null for plain text. */
-function parseDeckLink(cellText: string): { target: string; alias: string | null } | null {
+/** A link cell (deck or event): target and shown text, for wikilinks and Markdown links; null for plain text. */
+function parseLink(cellText: string): { target: string; alias: string | null } | null {
 	const t = cellText.trim();
 	const wiki = /^\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]$/.exec(t);
 	if (wiki) return { target: wiki[1].trim(), alias: wiki[2]?.trim() || null };
@@ -249,14 +291,14 @@ function parseDeckLink(cellText: string): { target: string; alias: string | null
 	return { target: target.replace(/\.md$/i, ""), alias: md[1].trim() || null };
 }
 
-/** Link target of a deck cell ("[[Decks/Somnus Revive|Somnus]]" or "[Somnus](Decks/Somnus%20Revive.md)" → "Decks/Somnus Revive"), or null for plain text. */
-export function deckLinkTarget(cellText: string): string | null {
-	return parseDeckLink(cellText)?.target ?? null;
+/** Link target of a deck or event cell ("[[Decks/Somnus Revive|Somnus]]" or "[Somnus](Decks/Somnus%20Revive.md)" → "Decks/Somnus Revive"), or null for plain text. */
+export function linkTarget(cellText: string): string | null {
+	return parseLink(cellText)?.target ?? null;
 }
 
-/** What a deck cell shows: the link's alias or file name, or the text itself. */
-export function deckCellLabel(cellText: string): string {
-	const link = parseDeckLink(cellText);
+/** What a deck or event cell shows: the link's alias or file name, or the text itself. */
+export function cellLabel(cellText: string): string {
+	const link = parseLink(cellText);
 	if (!link) return cellText.trim();
 	return link.alias ?? link.target.split("/").pop() ?? link.target;
 }
@@ -275,6 +317,24 @@ export function comparePatches(a: string, b: string): number {
 }
 
 // ---- stats -------------------------------------------------------------------
+
+/** How games without a type are listed in the tracker. */
+export const NO_TYPE = "No type";
+
+export function typeLabel(m: Match): string {
+	return m.type || NO_TYPE;
+}
+
+/** The types of a `type:` (or `types:`) line, lower case; empty for every type. */
+export function parseTypes(source: string): string[] {
+	const line = source.split("\n").find((l) => /^\s*types?\s*:/i.test(l));
+	if (!line) return [];
+	return line
+		.slice(line.indexOf(":") + 1)
+		.split(",")
+		.map((t) => t.trim().toLowerCase())
+		.filter(Boolean);
+}
 
 export function pairingLabel(opponent: Syndicate[]): string {
 	return opponent.length ? opponent.join(" + ") : "Unknown";
