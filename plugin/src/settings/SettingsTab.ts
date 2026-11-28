@@ -50,6 +50,10 @@ export interface ChronoSettings {
 	notesFolder: string;
 	/** Optional folder with user templates overriding the built-in ones. */
 	templateFolder: string;
+	/** Note used as the deck note template, from anywhere in the vault ("" = the template folder's, else built-in). */
+	deckTemplate: string;
+	/** Note used as the tournament report template ("" = the template folder's, else built-in). */
+	tournamentTemplate: string;
 	/** Log deck builder saves in the deck note's Changelog section. */
 	deckChangelog: boolean;
 	/** Note the match tracker keeps games in ("" = "Match log.md" in the notes folder). */
@@ -78,6 +82,8 @@ export const DEFAULT_SETTINGS: ChronoSettings = {
 	hoverPreviews: true,
 	notesFolder: "ChronoCCG",
 	templateFolder: "",
+	deckTemplate: "",
+	tournamentTemplate: "",
 	deckChangelog: true,
 	matchLog: "",
 	matchLogDeckAlias: true,
@@ -88,7 +94,7 @@ export const DEFAULT_SETTINGS: ChronoSettings = {
 };
 
 /** Keys of {@link ChronoSettings} bound to a declarative control. */
-type ControlKey = "cardBrowserPlacement" | "dataSource" | "customDataUrl" | "autoRefreshDays" | "cardImageStyle" | "deckView" | "hoverPreviews" | "notesFolder" | "templateFolder" | "deckChangelog" | "matchLog" | "matchLogDeckAlias" | "imageFolder";
+type ControlKey = "cardBrowserPlacement" | "dataSource" | "customDataUrl" | "autoRefreshDays" | "cardImageStyle" | "deckView" | "hoverPreviews" | "notesFolder" | "templateFolder" | "deckTemplate" | "tournamentTemplate" | "deckChangelog" | "matchLog" | "matchLogDeckAlias" | "imageFolder";
 
 export class ChronoSettingsTab extends PluginSettingTab {
 	/** Rows that show something derived from the settings (e.g. the images to download), redrawn when a setting changes. */
@@ -214,11 +220,24 @@ export class ChronoSettingsTab extends PluginSettingTab {
 						control: { type: "folder", key: "notesFolder", placeholder: "ChronoCCG", includeRoot: true },
 					},
 					{
+						name: "Deck note template",
+						desc: "Optional. A note from anywhere in your vault to use as the template for new deck notes. Empty = the template folder's \"Deck.md\", else the built-in template.",
+						aliases: ["template"],
+						control: { type: "file", key: "deckTemplate", placeholder: "ChronoCCG/Templates/Deck.md", filter: (f) => f.extension === "md" },
+					},
+					{
+						name: "Tournament report template",
+						desc: "Optional. A note to use as the template for new tournament reports. Empty = the template folder's \"Tournament report.md\", else the built-in template.",
+						aliases: ["template"],
+						control: { type: "file", key: "tournamentTemplate", placeholder: "ChronoCCG/Templates/Tournament report.md", filter: (f) => f.extension === "md" },
+					},
+					{
 						name: "Template folder",
 						desc:
-							'Optional. "Deck.md" and "Tournament report.md" files in this folder replace the built-in templates. ' +
+							'Optional. "Deck.md" and "Tournament report.md" files in this folder replace the built-in templates, unless you picked a template note above. ' +
 							"Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}; in tournament reports also " +
-							"{{event}} {{format}} {{roundCount}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}} (the live rounds of the event).",
+							"{{event}} {{format}} {{roundCount}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}} (the live rounds of the event). " +
+							"Obsidian's {{title}}, {{date:FORMAT}} and {{time}} work too.",
 						control: { type: "folder", key: "templateFolder", placeholder: "ChronoCCG/Templates" },
 					},
 					{
@@ -252,8 +271,10 @@ export class ChronoSettingsTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Match log",
-						desc: 'Note where the match tracker saves your games, as a table you can also edit by hand. Empty = "Match log.md" in the notes folder. Renaming this setting doesn\'t move existing games.',
-						control: { type: "text", key: "matchLog", placeholder: "ChronoCCG/Match log.md" },
+						desc:
+							'Note where the match tracker saves your games, as a table you can also edit by hand. Pick a note or type a path (it\'s created with the first game). Empty = "Match log.md" in the notes folder. ' +
+							"Renaming or moving the note in Obsidian keeps it the match log; changing this setting doesn't move the games already logged.",
+						control: { type: "file", key: "matchLog", placeholder: "ChronoCCG/Match log.md", filter: (f) => f.extension === "md" },
 					},
 					{
 						name: "Deck names in the match log",
@@ -482,6 +503,9 @@ function normalizeControlValue(key: ControlKey, value: unknown): unknown {
 		case "matchLog":
 			return typeof value === "string" ? value.trim() : "";
 		case "notesFolder":
+		case "deckTemplate":
+		case "tournamentTemplate":
+			return typeof value === "string" ? value.trim() : "";
 		case "templateFolder":
 			return typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
 		case "autoRefreshDays": {

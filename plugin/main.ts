@@ -23,7 +23,7 @@ import { TextPromptModal } from "./src/ui/TextPromptModal";
 import { imageCache } from "./src/utils/ImageCache";
 import { imageUrlsToSave } from "./src/utils/imageUrl";
 import { deckNoteFrontmatter, firstDeckBlockLink, updateDeckNoteProperties } from "./src/templates/DeckNoteSync";
-import { DEFAULT_TEMPLATES, NoteTemplates, TEMPLATE_FILE_NAMES, TemplateKind, TournamentDeck } from "./src/templates/Templates";
+import { DEFAULT_TEMPLATES, NoteTemplates, TEMPLATE_FILE_NAMES, TEMPLATE_SETTINGS, TemplateKind, TournamentDeck } from "./src/templates/Templates";
 import { TournamentModal, TournamentOptions } from "./src/ui/TournamentModal";
 import { MatchLog } from "./src/tracker/MatchLog";
 import { MatchTrackerView, VIEW_TYPE_MATCH_TRACKER } from "./src/tracker/MatchTrackerView";
@@ -57,6 +57,24 @@ export default class ChronoVaultPlugin extends Plugin {
 		const legacyCache = cached?.source === "runeterra.ar" && this.settings.dataSource === "official";
 
 		this.addSettingTab(new ChronoSettingsTab(this.app, this));
+
+		// The match log and template notes stay what they are when renamed or moved.
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				let changed = false;
+				// The log's path comes from the setting, or the notes folder when it's empty: either way it's now the setting.
+				if (oldPath === this.matchLog.path && file instanceof TFile) {
+					this.settings.matchLog = file.path;
+					changed = true;
+				}
+				for (const key of Object.values(TEMPLATE_SETTINGS)) {
+					if (this.settings[key] !== oldPath) continue;
+					this.settings[key] = file.path;
+					changed = true;
+				}
+				if (changed) void this.saveSettings();
+			}),
+		);
 
 		// Tournament reports' `record` follows the match log, also when it's edited by hand or a report's format changes.
 		const syncRecords = debounce(() => void this.matchLog.syncRecords(), 1000, true);
@@ -397,8 +415,10 @@ export default class ChronoVaultPlugin extends Plugin {
 		const notes: TFile[] = [];
 		if (!folder) return notes;
 		const templates = this.settings.templateFolder.trim() ? `${normalizePath(this.settings.templateFolder.trim())}/` : null;
+		// Template notes can be anywhere, also in the notes folder: they're never a deck or an event.
+		const chosen = [this.settings.deckTemplate, this.settings.tournamentTemplate].map((p) => p.trim()).filter(Boolean).map(normalizePath);
 		Vault.recurseChildren(folder, (file) => {
-			if (!(file instanceof TFile) || file.extension !== "md" || (templates && file.path.startsWith(templates))) return;
+			if (!(file instanceof TFile) || file.extension !== "md" || (templates && file.path.startsWith(templates)) || chosen.includes(file.path)) return;
 			const fm = match(file);
 			// The templates have the note's type too, with "{{name}}" still in them.
 			if (fm && !JSON.stringify(fm).includes("{{")) notes.push(file);
