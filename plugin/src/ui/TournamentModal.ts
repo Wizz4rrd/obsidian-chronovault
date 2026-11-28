@@ -12,6 +12,9 @@ export interface TournamentOptions {
 	codeDecks: Deck[];
 }
 
+/** Above this many deck notes, the deck list gets a filter. */
+const FILTER_FROM = 8;
+
 /** Event name, match format, number of rounds and the decks brought (several for Bo3/Bo5). */
 export class TournamentModal extends Modal {
 	private event = "";
@@ -55,18 +58,32 @@ export class TournamentModal extends Modal {
 				.onChange((v) => (this.rounds = v)),
 		);
 
-		new Setting(contentEl).setName("Decks").setHeading();
+		const heading = new Setting(contentEl).setName("Decks").setHeading();
+		const count = heading.nameEl.createSpan({ cls: "chrono-tournament-count" });
+		const syncCount = () => count.setText(this.picked.size ? ` · ${this.picked.size} picked` : "");
+		syncCount();
 		if (!this.deckNotes.length) {
 			contentEl.createEl("p", { cls: "setting-item-description", text: "No deck notes in the notes folder yet: paste deck codes below, or add the decks later." });
 		}
+		// With many decks, a filter; the list scrolls on its own, so the buttons stay in view.
+		const rows: Array<{ file: TFile; el: HTMLElement }> = [];
+		if (this.deckNotes.length > FILTER_FROM) {
+			const filter = contentEl.createEl("input", { type: "search", cls: "chrono-tournament-filter", attr: { placeholder: "Filter decks", "aria-label": "Filter decks" } });
+			filter.addEventListener("input", () => {
+				const q = filter.value.trim().toLowerCase();
+				for (const r of rows) r.el.toggle(!q || r.file.basename.toLowerCase().includes(q));
+			});
+		}
 		const list = contentEl.createDiv({ cls: "chrono-tournament-decks" });
 		for (const file of this.deckNotes) {
-			new Setting(list).setName(file.basename).addToggle((t) =>
+			const setting = new Setting(list).setName(file.basename).addToggle((t) =>
 				t.setValue(this.picked.has(file)).onChange((on) => {
 					if (on) this.picked.add(file);
 					else this.picked.delete(file);
+					syncCount();
 				}),
 			);
+			rows.push({ file, el: setting.settingEl });
 		}
 
 		new Setting(contentEl)
