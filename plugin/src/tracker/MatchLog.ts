@@ -1,6 +1,7 @@
 import { normalizePath, Notice, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
-import { addLogRow, deckCellLabel, deckLinkTarget, formatLogRow, logColumns, logTableHeader, Match, parseLog, replaceLogRow, tally, upgradeLog } from "../data/matches";
+import { addLogRow, cellLabel, extraColumns, formatLogRow, linkTarget, logColumns, logTableHeader, Match, parseLog, rewriteLogRow, tally, upgradeLog } from "../data/matches";
+import { MatchFormat, nextRound, parseFormat } from "../data/tournament";
 
 /** A game of the match log, with its deck note when the deck cell links to one. */
 export interface LoggedGame {
@@ -9,6 +10,10 @@ export interface LoggedGame {
 	/** Groups games by deck: the note's path, or the deck cell's text without a note. */
 	deckKey: string;
 	deckName: string;
+	/** The tournament report the event cell links to. */
+	event: TFile | null;
+	/** What the event cell shows (the report's name), or "" without an event. */
+	eventName: string;
 	/** The row as it is in the note. */
 	raw: string;
 }
@@ -36,11 +41,18 @@ export class MatchLog {
 		const file = this.file();
 		if (!file) return { games: [], invalid: [] };
 		const { rows, invalid } = parseLog(await this.plugin.app.vault.cachedRead(file));
+		const resolve = (cell: string) => {
+			const target = linkTarget(cell);
+			return target ? this.plugin.app.metadataCache.getFirstLinkpathDest(target, file.path) : null;
+		};
+		// A type typed in another case ("ladder") is the one of the settings, so the stats don't split it in two.
+		const types = new Map(this.plugin.settings.matchTypes.map((t) => [t.name.toLowerCase(), t.name]));
 		const games = rows.map((row): LoggedGame => {
-			const target = deckLinkTarget(row.deck);
-			const deck = target ? this.plugin.app.metadataCache.getFirstLinkpathDest(target, file.path) : null;
-			const name = deck?.basename ?? deckCellLabel(row.deck);
-			return { match: row.match, file: deck, deckKey: deck?.path ?? name, deckName: name || "(no deck)", raw: row.raw };
+			const deck = resolve(row.deck);
+			const name = deck?.basename ?? cellLabel(row.deck);
+			const event = row.match.event ? resolve(row.match.event) : null;
+			const match = { ...row.match, type: types.get(row.match.type.toLowerCase()) ?? row.match.type };
+			return { match, file: deck, deckKey: deck?.path ?? name, deckName: name || "(no deck)", event, eventName: event?.basename ?? cellLabel(row.match.event), raw: row.raw };
 		});
 		// Stable: games of the same day keep their row order.
 		games.sort((a, b) => (a.match.date || "").localeCompare(b.match.date || ""));
@@ -48,12 +60,29 @@ export class MatchLog {
 	}
 
 	/**
-	 * What the form starts with for a new game: only the patch (of the last
-	 * game logged this session, else the newest game). Opponent and archetype
-	 * change nearly every game, so they start blank.
+	 * What the form starts with for a new game: the patch, type and event of the
+	 * last game logged this session, else the patch of the newest game with one
+	 * and the type and event of the newest game. Opponent and archetype change
+	 * nearly every game, so they start blank. The round is suggested by the form.
 	 */
 	defaults(games: LoggedGame[]): Partial<Match> {
-		return { patch: this.plugin.lastPatch ?? games.filter((g) => g.match.patch).pop()?.match.patch ?? "" };
+		const last = this.plugin.lastLogged;
+		if (last) return { ...last };
+		const newest = games[games.length - 1]?.match;
+		return { patch: games.filter((g) => g.match.patch).pop()?.match.patch ?? "", type: newest?.type ?? "", event: newest?.event ?? "" };
+	}
+
+	/** The format of a tournament report (its `format` property), or null. */
+	eventFormat(event: TFile): MatchFormat | null {
+		return parseFormat(this.plugin.app.metadataCache.getFileCache(event)?.frontmatter?.format);
+	}
+
+	/** The round of the next game played in `event`, from its games logged so far. */
+	suggestRound(games: LoggedGame[], event: TFile): number {
+		return nextRound(
+			games.filter((g) => g.event === event).map((g) => g.match),
+			this.eventFormat(event),
+		);
 	}
 
 	/** The deck the form starts with for a new game: the deck of the newest game whose note is still in the deck picker. */
@@ -69,16 +98,16 @@ export class MatchLog {
 	async add(deck: TFile, match: Match): Promise<void> {
 		const file = await this.ensure();
 		await this.plugin.app.vault.process(file, (text) => {
-			const upgraded = upgradeLog(text);
-			return addLogRow(upgraded, formatLogRow(this.deckCell(deck), match, logColumns(upgraded)));
+			const upgraded = upgradeLog(text, extraColumns(match));
+			return addLogRow(upgraded, formatLogRow(this.linkCell(deck), match, logColumns(upgraded)));
 		});
-		this.plugin.lastPatch = match.patch;
+		this.plugin.lastLogged = { patch: match.patch, type: match.type, event: match.event };
 		const record = tally((await this.games()).games.filter((g) => g.file === deck).map((g) => g.match));
 		new Notice(`ChronoVault: ${match.result === "W" ? "win" : "loss"} logged for ${deck.basename} (now ${record.wins}–${record.losses}).`);
 	}
 
 	async update(game: LoggedGame, deck: TFile, match: Match): Promise<void> {
-		await this.rewrite(game, (columns) => formatLogRow(this.deckCell(deck), match, columns, game.raw));
+		await this.rewrite(game, (columns, previous) => formatLogRow(this.linkCell(deck), match, columns, previous), extraColumns(match));
 	}
 
 	async remove(game: LoggedGame): Promise<void> {
@@ -90,29 +119,29 @@ export class MatchLog {
 		await this.plugin.app.workspace.getLeaf(false).openFile(file);
 	}
 
-	/** Replace the game's row with `next` (given the table's columns), or remove it when `next` is null. */
-	private async rewrite(game: LoggedGame, next: ((columns: string[]) => string) | null): Promise<void> {
+	/** Replace the game's row with `next` (given the table's columns and the row), or remove it when `next` is null. */
+	private async rewrite(game: LoggedGame, next: ((columns: string[], previous: string) => string) | null, extra: string[] = []): Promise<void> {
 		const file = this.file();
 		let found = false;
 		if (file) {
 			await this.plugin.app.vault.process(file, (text) => {
-				// The row is found as it is now, then the table gets any missing column.
-				const out = replaceLogRow(text, game.raw, next ? next(logColumns(text)) : null);
+				// The row is found as it is now, and the table gets any missing column first.
+				const out = rewriteLogRow(text, game.raw, next, extra);
 				found = out !== null;
-				return out === null ? text : upgradeLog(out);
+				return out ?? text;
 			});
 		}
 		if (!found) new Notice("ChronoVault: that game is no longer in the match log (was it edited by hand?).");
 	}
 
 	/**
-	 * A link to the deck note, written the way the vault's "Files and links" settings say (wikilink or Markdown, path format).
-	 * With "Deck names in the match log", a link with a path shows the deck's name: "[[Decks/Egg Novice|Egg Novice]]".
+	 * A link to a deck note or tournament report, written the way the vault's "Files and links" settings say (wikilink or Markdown, path format).
+	 * With "Deck names in the match log", a link with a path shows the note's name: "[[Decks/Egg Novice|Egg Novice]]".
 	 */
-	private deckCell(deck: TFile): string {
-		const link = this.plugin.app.fileManager.generateMarkdownLink(deck, this.path);
-		if (!this.plugin.settings.matchLogDeckAlias || deckLinkTarget(link) === deck.basename) return link;
-		return this.plugin.app.fileManager.generateMarkdownLink(deck, this.path, undefined, deck.basename);
+	linkCell(note: TFile): string {
+		const link = this.plugin.app.fileManager.generateMarkdownLink(note, this.path);
+		if (!this.plugin.settings.matchLogDeckAlias || linkTarget(link) === note.basename) return link;
+		return this.plugin.app.fileManager.generateMarkdownLink(note, this.path, undefined, note.basename);
 	}
 
 	private async ensure(): Promise<TFile> {

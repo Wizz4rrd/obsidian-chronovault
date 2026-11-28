@@ -73,6 +73,10 @@ placement:
 
 ## Decklists
 {{decklists}}
+## Results
+\`\`\`chrono-matches
+\`\`\`
+
 ## Rounds
 {{rounds}}
 ## Takeaways

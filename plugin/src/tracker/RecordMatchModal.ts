@@ -1,8 +1,29 @@
 import { Modal, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
-import { comparePatches, Match } from "../data/matches";
+import { comparePatches, linkTarget, Match } from "../data/matches";
 import { LoggedGame } from "./MatchLog";
-import { renderMatchForm } from "./MatchForm";
+import { MatchFormOptions, renderMatchForm } from "./MatchForm";
+
+/** The form options that come from the plugin and the games logged so far (all but the deck and the game). */
+export function matchFormOptions(plugin: ChronoVaultPlugin, games: LoggedGame[]): Pick<MatchFormOptions, "archetypes" | "patches" | "codeSyndicates" | "types" | "tournament"> {
+	const log = plugin.matchLog;
+	return {
+		archetypes: uniqueArchetypes(games.map((g) => g.match.archetype)),
+		patches: uniquePatches(games.map((g) => g.match.patch)),
+		codeSyndicates: (code) => plugin.codeSyndicates(code),
+		types: plugin.settings.matchTypes.map((t) => t.name),
+		tournament: {
+			isType: (type) => plugin.isTournamentType(type),
+			reports: plugin.tournamentNotes(),
+			resolve: (cell) => {
+				const target = linkTarget(cell);
+				return target ? plugin.app.metadataCache.getFirstLinkpathDest(target, log.path) : null;
+			},
+			cell: (report) => log.linkCell(report),
+			suggestRound: (report) => log.suggestRound(games, report),
+		},
+	};
+}
 
 /**
  * The match form in a modal: "Record match result" (new game, from anywhere)
@@ -22,11 +43,9 @@ export class RecordMatchModal extends Modal {
 		this.modalEl.addClass("chrono-match-modal");
 		const { games } = await this.plugin.matchLog.games();
 		const form = renderMatchForm(this.contentEl, {
+			...matchFormOptions(this.plugin, games),
 			decks: this.plugin.deckNotes(),
 			deck: this.editing?.file ?? this.deck ?? this.plugin.matchLog.lastDeck(games),
-			archetypes: uniqueArchetypes(games.map((g) => g.match.archetype)),
-			patches: uniquePatches(games.map((g) => g.match.patch)),
-			codeSyndicates: (code) => this.plugin.codeSyndicates(code),
 			initial: this.editing?.match ?? this.plugin.matchLog.defaults(games),
 			editing: !!this.editing,
 			onSubmit: async (file, match) => {

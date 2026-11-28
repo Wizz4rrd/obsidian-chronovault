@@ -15,6 +15,9 @@ export interface MatchFormOptions {
 	patches: string[];
 	/** The syndicates of a deck code's Divers, or null when it isn't a valid code. */
 	codeSyndicates: (code: string) => Syndicate[] | null;
+	/** Match types to pick from (the "Match types" setting). */
+	types: string[];
+	tournament: TournamentFields;
 	/** Opponent and archetype of the last game and the latest patch, kept for the next one; a whole game when editing it. */
 	initial?: Partial<Match>;
 	/** Editing a game: its result button is highlighted. */
@@ -22,11 +25,26 @@ export interface MatchFormOptions {
 	onSubmit: (file: TFile, match: Match) => void | Promise<void>;
 }
 
+/** What the form needs for tournament games: which types are tournaments, the reports to pick from and the round to suggest. */
+export interface TournamentFields {
+	isType: (type: string) => boolean;
+	/** Tournament reports, newest first. */
+	reports: TFile[];
+	/** The report an event cell links to. */
+	resolve: (cell: string) => TFile | null;
+	/** The event cell for a report (a link). */
+	cell: (report: TFile) => string;
+	suggestRound: (report: TFile) => number;
+}
+
 let formCount = 0;
+/** Event picker value for an event cell that doesn't link to a report (kept as written). */
+const RAW_EVENT = "\u0000raw";
 
 /**
- * Deck, opponent's syndicates (up to two), optional archetype /
- * date / patch / opponent's deck code / note, and Win / Loss buttons that record the game.
+ * Deck, type (with the tournament report and round for a tournament type),
+ * opponent's syndicates (up to two), optional archetype / date / patch /
+ * opponent's deck code / note, and Win / Loss buttons that record the game.
  * Shared by the match tracker and the "Record match result" modal.
  */
 export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { focus: () => void } {
@@ -34,8 +52,8 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 	let deck: TFile | null = opts.deck ?? opts.decks[0] ?? null;
 	let opponent: Syndicate[] = (opts.initial?.opponent ?? []).slice();
 
-	const row = (label: string) => {
-		const r = form.createDiv({ cls: "chrono-match-row" });
+	const row = (label: string, parent: HTMLElement = form) => {
+		const r = parent.createDiv({ cls: "chrono-match-row" });
 		r.createDiv({ cls: "chrono-match-label", text: label });
 		return r.createDiv({ cls: "chrono-match-field" });
 	};
@@ -50,6 +68,63 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 			select.addEventListener("change", () => (deck = opts.decks.find((f) => f.path === select.value) ?? null));
 		}
 	}
+
+	// Type: the settings' types, plus the game's own when editing one whose type isn't in them.
+	let type = opts.initial?.type ?? "";
+	const types = opts.types.slice();
+	if (type && !types.some((t) => t.toLowerCase() === type.toLowerCase())) types.push(type);
+	type = types.find((t) => t.toLowerCase() === type.toLowerCase()) ?? "";
+	if (types.length) {
+		const select = row("Type").createEl("select", { cls: "dropdown", attr: { "aria-label": "Match type" } });
+		select.createEl("option", { value: "", text: "None" });
+		for (const t of types) select.createEl("option", { value: t, text: t });
+		select.value = type;
+		select.addEventListener("change", () => {
+			type = select.value;
+			syncType();
+		});
+	}
+
+	// Event and round, shown for a tournament type, and kept when editing a game whose
+	// type isn't one but that has an event anyway (e.g. typed by hand in the log).
+	const tour = opts.tournament;
+	const initialEvent = opts.initial?.event ?? "";
+	const keepEvent = !!opts.editing && !!(initialEvent || opts.initial?.round) && !tour.isType(opts.initial?.type ?? "");
+	const eventBox = form.createDiv({ cls: "chrono-match-event" });
+	const eventField = row("Event", eventBox);
+	const event = eventField.createEl("select", { cls: "dropdown", attr: { "aria-label": "Tournament report" } });
+	event.createEl("option", { value: "", text: "None" });
+	for (const f of tour.reports) event.createEl("option", { value: f.path, text: f.basename });
+	const initialReport = initialEvent ? tour.resolve(initialEvent) : null;
+	if (initialReport && !tour.reports.includes(initialReport)) event.createEl("option", { value: initialReport.path, text: initialReport.basename });
+	if (initialEvent && !initialReport) event.createEl("option", { value: RAW_EVENT, text: initialEvent });
+	event.value = initialReport?.path ?? (initialEvent ? RAW_EVENT : "");
+	if (!tour.reports.length) eventField.createDiv({ cls: "chrono-match-hint", text: "No tournament reports yet. Create one with “New tournament report”." });
+	const report = (): TFile | null => (event.value && event.value !== RAW_EVENT ? (tour.reports.find((f) => f.path === event.value) ?? initialReport) : null);
+	const round = row("Round", eventBox).createEl("input", { type: "number", cls: "chrono-match-input chrono-match-round", attr: { min: "1", step: "1", placeholder: "1" } });
+	const suggest = () => {
+		const r = report();
+		round.value = r ? String(tour.suggestRound(r)) : "";
+	};
+	if (opts.editing) round.value = opts.initial?.round ? String(opts.initial.round) : "";
+	else suggest();
+	event.addEventListener("change", suggest);
+	const showEvent = () => tour.isType(type) || keepEvent;
+	const eventCell = (): string => {
+		if (!showEvent()) return "";
+		if (event.value === RAW_EVENT) return initialEvent;
+		const r = report();
+		return r ? tour.cell(r) : "";
+	};
+	function syncType(): void {
+		// The newest report is most likely the one being played.
+		if (tour.isType(type) && !event.value && tour.reports.length && !opts.editing) {
+			event.value = tour.reports[0].path;
+			suggest();
+		}
+		eventBox.toggle(showEvent());
+	}
+	syncType();
 
 	const oppField = row("Opponent");
 	const chips = oppField.createDiv({ cls: "chrono-match-synds" });
@@ -123,6 +198,9 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 			opponent: opponent.slice(),
 			archetype: archetype(),
 			opponentDeck: unwrapDeckCode(code.value).replace(/\s+/g, ""),
+			type,
+			event: eventCell(),
+			round: showEvent() ? Math.max(0, Math.floor(Number(round.value))) || null : null,
 			note: note.value.trim(),
 		});
 		if (!opts.editing) {

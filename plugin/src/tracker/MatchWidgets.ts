@@ -1,3 +1,4 @@
+import { TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { renderTextWithCardRefs } from "../markdown/InlineCardRef";
 import { currentStreak, formatRate, formatRecord, Match, MatchRecord, MatchResult, pairingLabel, SMALL_SAMPLE, tally, weeklyRecords, winRate } from "../data/matches";
@@ -142,15 +143,37 @@ export function renderKpis(parent: HTMLElement, matches: Match[]): HTMLElement {
 	return el;
 }
 
-/** One game: result, date, deck (when given), opponent, archetype, patch and note (its `chrono:` refs as card references). */
-export function renderGameRow(plugin: ChronoVaultPlugin, parent: HTMLElement, m: Match, deck?: string): HTMLElement {
+export interface GameRowOptions {
+	/** The deck's name, shown when the list mixes decks. */
+	deck?: string;
+	/** The event's name and its report (clicking it opens the report). */
+	eventName?: string;
+	event?: TFile | null;
+}
+
+/**
+ * One game: result, date, deck (when given), opponent, archetype, type, event
+ * and round, patch and note (its `chrono:` refs as card references).
+ */
+export function renderGameRow(plugin: ChronoVaultPlugin, parent: HTMLElement, m: Match, opts: GameRowOptions = {}): HTMLElement {
 	const row = parent.createDiv({ cls: "chrono-match-game" });
 	renderResultChip(row, m.result);
 	row.createSpan({ cls: "chrono-match-date", text: m.date || "–" });
-	if (deck) row.createSpan({ cls: "chrono-match-deck", text: deck });
+	if (opts.deck) row.createSpan({ cls: "chrono-match-deck", text: opts.deck });
 	row.createSpan({ cls: "chrono-match-vs", text: "vs" });
 	renderPairing(row, m.opponent);
 	if (m.archetype) row.createSpan({ cls: "chrono-match-tag", text: m.archetype });
+	if (m.type) row.createSpan({ cls: "chrono-match-tag chrono-match-type-tag", text: m.type });
+	if (opts.eventName || m.round) {
+		const text = [opts.eventName, m.round ? `round ${m.round}` : ""].filter(Boolean).join(", ");
+		const tag = row.createSpan({ cls: "chrono-match-tag chrono-match-event-tag", text });
+		const report = opts.event;
+		if (report) {
+			tag.addClass("is-link");
+			tag.setAttr("title", "Open the tournament report");
+			tag.addEventListener("click", () => void plugin.app.workspace.getLeaf(false).openFile(report));
+		}
+	}
 	if (m.patch) row.createSpan({ cls: "chrono-match-tag", text: `patch ${m.patch}` });
 	if (m.note) renderTextWithCardRefs(plugin, row.createSpan({ cls: "chrono-match-note" }), m.note);
 	return row;

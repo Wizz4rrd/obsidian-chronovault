@@ -2,6 +2,7 @@
 type: chrono-tournament
 event: "Weekly Dive"
 date: 2026-11-02
+format: Bo3
 deck: "[[Somnus Revive]]"
 record: 3-1
 placement: 2nd
@@ -14,6 +15,10 @@ placement: 2nd
 ## Decklist
 ```chrono-deck
 AUGVG33NNZ2XGICSMV3GS5TFBNRW63TTORZHKY3UMVSHUAACAEAAFBIBA4GGMAYMAMHAGCADNUBQEAYZAMBQGAQDAMBQEAYCAM
+```
+
+## Results
+```chrono-matches
 ```
 
 ## Rounds

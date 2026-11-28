@@ -5,7 +5,7 @@ import { SEED_DATABASE } from "./src/data/cards.seed";
 import { Card, Deck, Syndicate, SYNDICATES } from "./src/data/types";
 import { decodeDeck } from "./src/data/DeckCodec";
 import { allowedSyndicates } from "./src/data/DeckRules";
-import { CardBrowserPlacement, ChronoSettings, ChronoSettingsTab, DEFAULT_SETTINGS } from "./src/settings/SettingsTab";
+import { CardBrowserPlacement, ChronoSettings, ChronoSettingsTab, DEFAULT_SETTINGS, MatchType } from "./src/settings/SettingsTab";
 import { registerCardCodeBlock } from "./src/markdown/CardCodeBlock";
 import { registerMatchesCodeBlock } from "./src/markdown/MatchesCodeBlock";
 import { parseDeck, registerDeckCodeBlock } from "./src/markdown/DeckCodeBlock";
@@ -28,6 +28,8 @@ import { TournamentModal, TournamentOptions } from "./src/ui/TournamentModal";
 import { MatchLog } from "./src/tracker/MatchLog";
 import { MatchTrackerView, VIEW_TYPE_MATCH_TRACKER } from "./src/tracker/MatchTrackerView";
 import { RecordMatchModal } from "./src/tracker/RecordMatchModal";
+import { Match } from "./src/data/matches";
+import { TOURNAMENT_NOTE_TYPE } from "./src/data/tournament";
 
 export default class ChronoVaultPlugin extends Plugin {
 	settings!: ChronoSettings;
@@ -35,8 +37,8 @@ export default class ChronoVaultPlugin extends Plugin {
 	sync!: DataSync;
 	templates = new NoteTemplates(this);
 	matchLog = new MatchLog(this);
-	/** Patch of the last recorded game, preselected for the next one. */
-	lastPatch: string | null = null;
+	/** Patch, type and event of the last recorded game, preselected for the next one. */
+	lastLogged: Pick<Match, "patch" | "type" | "event"> | null = null;
 
 	async onload(): Promise<void> {
 		const migratedFromRuneterra = await this.loadSettings();
@@ -361,6 +363,26 @@ export default class ChronoVaultPlugin extends Plugin {
 	/** "[[Deck note]]" when the active note is a deck note, else "". */
 	/** Deck notes (`type: chrono-deck`) in the notes folder, by name. Only that folder is looked through, not the whole vault. */
 	deckNotes(): TFile[] {
+		return this.notesOf((file) => deckNoteFrontmatter(this.app, file)).sort((a, b) => a.basename.localeCompare(b.basename));
+	}
+
+	/** Tournament reports (`type: chrono-tournament`) in the notes folder, newest first (by their `date`, then name). */
+	tournamentNotes(): TFile[] {
+		const date = (f: TFile) => String(this.app.metadataCache.getFileCache(f)?.frontmatter?.date ?? "");
+		return this.notesOf((file) => {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			return fm?.type === TOURNAMENT_NOTE_TYPE ? fm : null;
+		}).sort((a, b) => date(b).localeCompare(date(a)) || b.basename.localeCompare(a.basename));
+	}
+
+	/** Whether `type` is a tournament type in the "Match types" setting (any case). */
+	isTournamentType(type: string): boolean {
+		const t = type.trim().toLowerCase();
+		return !!t && this.settings.matchTypes.some((m) => m.tournament && m.name.toLowerCase() === t);
+	}
+
+	/** Notes of the notes folder (but not the template folder) whose frontmatter `match` accepts. */
+	private notesOf(match: (file: TFile) => Record<string, unknown> | null): TFile[] {
 		const folderPath = this.settings.notesFolder.trim();
 		const folder = folderPath ? this.app.vault.getFolderByPath(normalizePath(folderPath)) : this.app.vault.getRoot();
 		const notes: TFile[] = [];
@@ -368,11 +390,11 @@ export default class ChronoVaultPlugin extends Plugin {
 		const templates = this.settings.templateFolder.trim() ? `${normalizePath(this.settings.templateFolder.trim())}/` : null;
 		Vault.recurseChildren(folder, (file) => {
 			if (!(file instanceof TFile) || file.extension !== "md" || (templates && file.path.startsWith(templates))) return;
-			const fm = deckNoteFrontmatter(this.app, file);
-			// The deck note template has the deck type too, with "{{name}}" still in it.
+			const fm = match(file);
+			// The templates have the note's type too, with "{{name}}" still in them.
 			if (fm && !JSON.stringify(fm).includes("{{")) notes.push(file);
 		});
-		return notes.sort((a, b) => a.basename.localeCompare(b.basename));
+		return notes;
 	}
 
 	private async newTournamentReport(opts: TournamentOptions): Promise<void> {
@@ -449,6 +471,9 @@ export default class ChronoVaultPlugin extends Plugin {
 		// Settings of the runeterra.ar image fallback.
 		delete legacy.imageBase;
 		delete legacy.imageSize;
+		const types = this.settings.matchTypes as unknown;
+		if (!Array.isArray(types)) this.settings.matchTypes = defaults.matchTypes;
+		else this.settings.matchTypes = types.filter((t): t is MatchType => typeof (t as MatchType)?.name === "string" && !!(t as MatchType).name.trim()).map((t) => ({ name: t.name.trim(), tournament: !!t.tournament }));
 		const draft = this.settings.builderDraft;
 		if (!draft?.deck || !Array.isArray(draft.deck.divers) || !Array.isArray(draft.deck.entries)) {
 			this.settings.builderDraft = { deck: emptyDeck() };
