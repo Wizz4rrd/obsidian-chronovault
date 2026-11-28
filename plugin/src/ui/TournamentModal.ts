@@ -1,9 +1,12 @@
 import { App, Modal, Setting, TFile } from "obsidian";
 import { MATCH_FORMATS, MatchFormat, parseDeckCodes } from "../data/tournament";
+import { today } from "../data/matches";
 import { Deck } from "../data/types";
 
 export interface TournamentOptions {
 	event: string;
+	/** YYYY-MM-DD: the report's date and the start of its name. */
+	date: string;
 	format: MatchFormat;
 	rounds: number;
 	/** Deck notes brought to the event, in list order. */
@@ -15,9 +18,10 @@ export interface TournamentOptions {
 /** Above this many deck notes, the deck list gets a filter. */
 const FILTER_FROM = 8;
 
-/** Event name, match format, number of rounds and the decks brought (several for Bo3/Bo5). */
+/** Event name, date, match format, number of rounds and the decks brought (several for Bo3/Bo5). */
 export class TournamentModal extends Modal {
 	private event = "";
+	private date = today();
 	private format: MatchFormat = "Bo3";
 	private rounds = 3;
 	private picked: Set<TFile>;
@@ -43,6 +47,10 @@ export class TournamentModal extends Modal {
 				if (evt.key === "Enter") this.submit();
 			});
 			window.setTimeout(() => t.inputEl.focus(), 0);
+		});
+		new Setting(contentEl).setName("Date").addText((t) => {
+			t.inputEl.type = "date";
+			t.setValue(this.date).onChange((v) => (this.date = v));
 		});
 		new Setting(contentEl)
 			.setName("Format")
@@ -113,6 +121,7 @@ export class TournamentModal extends Modal {
 		this.close();
 		this.onSubmit({
 			event: this.event.trim() || "Tournament",
+			date: this.date || today(),
 			format: this.format,
 			rounds: this.rounds,
 			decks: this.deckNotes.filter((f) => this.picked.has(f)),

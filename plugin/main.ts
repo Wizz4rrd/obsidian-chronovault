@@ -405,7 +405,7 @@ export default class ChronoVaultPlugin extends Plugin {
 		}
 		// Decks without a note: named after the deck, with their decklist from the code.
 		for (const deck of opts.codeDecks) decks.push({ link: deck.name, deck });
-		await this.templates.createTournamentNote(opts.event, opts.format, opts.rounds, decks);
+		await this.templates.createTournamentNote(opts.event, opts.date, opts.format, opts.rounds, decks);
 	}
 
 	private firstDeck(text: string): Deck | undefined {

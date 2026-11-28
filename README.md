@@ -75,7 +75,7 @@ cards:
 | Insert inline card reference… / Insert card image block… | |
 | Look up a card… | |
 | New deck note | Also opens the deck builder, linked to the new note |
-| New tournament report | Asks for the event, the format (Bo1, Bo3, Bo5), the number of rounds and the decks you bring: any number of deck notes (from the notes folder), plus deck codes (one per line) for decks you have no note for |
+| New tournament report | Asks for the event, the date (today by default; it starts the note's name), the format (Bo1, Bo3, Bo5), the number of rounds and the decks you bring: any number of deck notes (from the notes folder), plus deck codes (one per line) for decks you have no note for |
 | Open match tracker | Also in the ribbon (trophy). From a deck note, opens that deck's page |
 | Record match result… | Logs a game without opening the tracker. From a deck note, that deck is picked |
 | Open match log note | The note the games are saved in |

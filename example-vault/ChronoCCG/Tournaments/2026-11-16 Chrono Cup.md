@@ -10,6 +10,7 @@ placement:
 # 2026-11-16 Chrono Cup
 
 **Event:** Chrono Cup
+**Date:** 2026-11-16
 **Format:** Bo3
 **Decks:** [[Somnus Revive]], [[Dino Swoop]]
 

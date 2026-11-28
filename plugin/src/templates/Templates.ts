@@ -68,6 +68,7 @@ placement:
 # {{name}}
 
 **Event:** {{event}}
+**Date:** {{date}}
 **Format:** {{format}}
 **Decks:** {{deckLinks}}
 
@@ -96,6 +97,8 @@ export interface TemplateVars {
 	name: string;
 	deck?: Deck;
 	event?: string;
+	/** YYYY-MM-DD; today when not given. */
+	date?: string;
 	format?: MatchFormat;
 	rounds?: number;
 	decks?: TournamentDeck[];
@@ -120,7 +123,7 @@ export class NoteTemplates {
 		}
 		const values: Record<string, string> = {
 			name: vars.name,
-			date: today(),
+			date: vars.date || today(),
 			deck: deck ? toCodeBlock(deck, cards) : "",
 			code,
 			divers: deck ? deck.divers.map((id) => yamlQuote(cards.getById(id)?.name ?? String(id))).join(", ") : "",
@@ -166,9 +169,9 @@ export class NoteTemplates {
 		return this.createNote("deck", { name: deck.name || "Untitled deck", deck }, "Decks");
 	}
 
-	createTournamentNote(event: string, format: MatchFormat, rounds: number, decks: TournamentDeck[]): Promise<TFile | null> {
-		const name = `${today()} ${event}`;
-		return this.createNote("tournament", { name, event, format, rounds, decks }, "Tournaments");
+	createTournamentNote(event: string, date: string, format: MatchFormat, rounds: number, decks: TournamentDeck[]): Promise<TFile | null> {
+		const day = date || today();
+		return this.createNote("tournament", { name: `${day} ${event}`, event, date: day, format, rounds, decks }, "Tournaments");
 	}
 }
 
