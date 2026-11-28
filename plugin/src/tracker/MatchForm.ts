@@ -23,6 +23,15 @@ export interface MatchFormOptions {
 	/** Editing a game: its result button is highlighted. */
 	editing?: boolean;
 	onSubmit: (file: TFile, match: Match) => void | Promise<void>;
+	/** Told when the type, event or deck is picked, so a form drawn again (e.g. the tracker's) can start from them. */
+	onPick?: (picked: FormPicks) => void;
+}
+
+/** What the form keeps between games: the type, the event (as its log cell) and the deck. */
+export interface FormPicks {
+	type: string;
+	event: string;
+	deck: TFile | null;
 }
 
 /** What the form needs for tournament games: which types are tournaments, the reports to pick from and the round to suggest. */
@@ -64,18 +73,20 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 	};
 
 	// Type: the settings' types, plus the game's own when editing one whose type isn't in them.
+	// A new game always gets a type (the first one by default); only a game logged without one keeps "None" when edited.
 	let type = opts.initial?.type ?? "";
 	const types = opts.types.slice();
 	if (type && !types.some((t) => t.toLowerCase() === type.toLowerCase())) types.push(type);
-	type = types.find((t) => t.toLowerCase() === type.toLowerCase()) ?? "";
+	type = types.find((t) => t.toLowerCase() === type.toLowerCase()) ?? (opts.editing ? "" : (types[0] ?? ""));
 	if (types.length) {
 		const select = row("Type").createEl("select", { cls: "dropdown", attr: { "aria-label": "Match type" } });
-		select.createEl("option", { value: "", text: "None" });
+		if (!type) select.createEl("option", { value: "", text: "None" });
 		for (const t of types) select.createEl("option", { value: t, text: t });
 		select.value = type;
 		select.addEventListener("change", () => {
 			type = select.value;
 			syncType();
+			picked();
 		});
 	}
 
@@ -128,6 +139,7 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 		if (!opts.editing) playerTyped = false;
 		suggest();
 		fillDecks();
+		picked();
 	});
 
 	// Deck: for a tournament game, the decks the report lists (when it lists any).
@@ -146,8 +158,15 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 		const select = deckField.createEl("select", { cls: "dropdown", attr: { "aria-label": "Deck" } });
 		for (const f of list) select.createEl("option", { text: f.basename, value: f.path });
 		if (deck) select.value = deck.path;
-		select.addEventListener("change", () => (deck = list.find((f) => f.path === select.value) ?? null));
+		select.addEventListener("change", () => {
+			deck = list.find((f) => f.path === select.value) ?? null;
+			picked();
+		});
 		if (brought.length) deckField.createDiv({ cls: "chrono-match-hint", text: "The decks listed in the tournament report." });
+	}
+
+	function picked(): void {
+		opts.onPick?.({ type, event: eventCell(), deck });
 	}
 
 	function syncType(): void {

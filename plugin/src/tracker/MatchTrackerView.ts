@@ -1,6 +1,6 @@
 import { debounce, ItemView, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
-import { comparePatches, formatRate, formatRecord, groupRecords, matchesVs, NO_TYPE, pairingLabel, SMALL_SAMPLE, tally, typeLabel, winRate } from "../data/matches";
+import { comparePatches, formatRate, formatRecord, groupRecords, Match, matchesVs, NO_TYPE, pairingLabel, SMALL_SAMPLE, tally, typeLabel, winRate } from "../data/matches";
 import { Syndicate, SYNDICATES } from "../data/types";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { renderSyndicateIcon } from "../ui/SyndicateIcon";
@@ -38,6 +38,8 @@ export class MatchTrackerView extends ItemView {
 	private showAllGames = false;
 	/** Deck preselected in the form (the note the tracker was opened from, or the last deck logged). */
 	private formDeck: TFile | null = null;
+	/** The type and event picked in the form (or of the last game logged from it), kept when the view is drawn again. */
+	private formPicks: Pick<Match, "type" | "event"> | null = null;
 	private body!: HTMLElement;
 	private refreshSoon = debounce(() => void this.render(), 300, true);
 
@@ -74,6 +76,7 @@ export class MatchTrackerView extends ItemView {
 	/** Show the games of a tournament report (every deck). */
 	focusEvent(report: TFile): void {
 		this.deckFilter = "";
+		this.formPicks = null;
 		this.eventFilter = report.path;
 		void this.render();
 	}
@@ -118,9 +121,15 @@ export class MatchTrackerView extends ItemView {
 			decks,
 			deck: this.app.vault.getFileByPath(this.deckFilter) ?? this.formDeck ?? this.plugin.matchLog.lastDeck(all),
 			// Showing a tournament's games: the next one is played in it.
-			initial: newGameDefaults(this.plugin, all, this.eventFilter ? this.app.vault.getFileByPath(this.eventFilter) : null),
+			// Showing a tournament's games, the next one is played in it, until another type or event is picked.
+			initial: { ...newGameDefaults(this.plugin, all, this.eventFilter ? this.app.vault.getFileByPath(this.eventFilter) : null), ...this.formPicks },
+			onPick: (p) => {
+				this.formPicks = { type: p.type, event: p.event };
+				this.formDeck = p.deck;
+			},
 			onSubmit: async (file, match) => {
 				this.formDeck = file;
+				this.formPicks = { type: match.type, event: match.event };
 				await this.plugin.matchLog.add(file, match);
 			},
 		});
