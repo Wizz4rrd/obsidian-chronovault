@@ -88,7 +88,17 @@ New notes go in `ChronoCCG/Decks` and `ChronoCCG/Tournaments` (you can change th
 
 In a deck note (`type: chrono-deck`), the `deck`, `syndicates`, `divers` and `code` properties describe the first `chrono-deck` block. Saving from the deck builder updates them. If you edit the block by hand, the block shows "Note properties are out of date" with an Update button (or run "Update deck note properties"). Properties your template doesn't have are left alone.
 
-Saving a deck note from the deck builder also adds a line to its "Changelog" section, e.g. ``- 2026-11-14 — Diver `chrono:Agent of Stability` → `chrono:Leeflo Mentor`, +2 `chrono:Bloom`, −1 `chrono:Throwdown` ``. Saves on the same day are merged into one line. Notes without a "Changelog" heading are left alone, and you can turn this off in the settings ("Log deck changes"). To edit the templates, click "Write templates" in the settings (Notes → Default templates) and change the files it creates. Placeholders: `{{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}`, and in tournament reports `{{event}} {{format}} {{roundCount}}` (the planned rounds) `{{decks}}` (for the `decks` property) `{{deckLinks}} {{decklists}} {{rounds}}` (a `chrono-matches` block: the rounds, live).
+Saving a deck note from the deck builder also adds a line to its "Changelog" section, e.g. ``- 2026-11-14 — Diver `chrono:Agent of Stability` → `chrono:Leeflo Mentor`, +2 `chrono:Bloom`, −1 `chrono:Throwdown` ``. Saves on the same day are merged into one line. Notes without a "Changelog" heading are left alone, and you can turn this off in the settings ("Log deck changes"). 
+
+You can use your own templates. In the settings (Notes), pick a note from anywhere in your vault as the "Deck note template" and the "Tournament report template". For each note type, the plugin uses:
+
+1. the note you picked (if you rename or move it, the setting follows; if you delete it, you get a notice and the built-in template is used),
+2. else `Deck.md` / `Tournament report.md` in the template folder,
+3. else the built-in template.
+
+To start from the built-in ones, click "Write templates" (Notes → Default templates): it copies them into the template folder for you to edit. Template notes are never listed as decks or events, even inside the notes folder.
+
+Placeholders: `{{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}`, and in tournament reports `{{event}} {{format}} {{roundCount}}` (the planned rounds) `{{decks}}` (for the `decks` property) `{{deckLinks}} {{decklists}} {{rounds}}`. A tournament report template needs `{{rounds}}` (or a `chrono-matches` block) to show the rounds, and its `type: chrono-tournament`, `format`, `rounds` and `decks` properties are what the plugin reads (see below). Obsidian's core Templates placeholders work too, so one note can be both kinds of template: `{{title}}` (the note's name), `{{date}}` and `{{date:dddd D MMMM}}` (the note's date: today, or the tournament's date), `{{time}}` and `{{time:HH:mm}}`. Other placeholders (e.g. Templater's) are left as they are.
 
 #### Tournament reports
 
@@ -110,7 +120,7 @@ Its "Rounds" section is a `chrono-matches` block: the match and game records, th
 
 ![The match tracker](docs/screenshots/match-tracker.png)
 
-Games go in one note, `ChronoCCG/Match log.md` by default (you can change it in the settings), as a table with a row per game: date, patch, deck (a link to the deck note), result (W or L), the opponent's syndicates, archetype, the opponent's deck code, type and a note. Tournament games also have an event (a link to the tournament report), a round and the opponent's name (Player); those three columns are added with the first tournament game. You can edit it by hand, and columns are found by their name, so you can reorder them or add your own. Deck links show the deck's name (`[[Decks/Egg Novice|Egg Novice]]`), you can turn that off in the settings ("Deck names in the match log"). In the note, `` `chrono:Hush Now` `` works like anywhere else, and the tracker's game list shows it as a card reference too.
+Games go in one note, `ChronoCCG/Match log.md` by default (you can pick another note in the settings, and renaming or moving it in Obsidian keeps it the match log), as a table with a row per game: date, patch, deck (a link to the deck note), result (W or L), the opponent's syndicates, archetype, the opponent's deck code, type and a note. Tournament games also have an event (a link to the tournament report), a round and the opponent's name (Player); those three columns are added with the first tournament game. You can edit it by hand, and columns are found by their name, so you can reorder them or add your own. Deck links show the deck's name (`[[Decks/Egg Novice|Egg Novice]]`), you can turn that off in the settings ("Deck names in the match log"). In the note, `` `chrono:Hush Now` `` works like anywhere else, and the tracker's game list shows it as a card reference too.
 
 In the tracker:
 - Filters: period, patch, deck, type, event (once you have tournament games), and "Vs": pick one syndicate for every game against it (whatever the other one was), or two for that pair.

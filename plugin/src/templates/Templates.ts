@@ -1,9 +1,10 @@
-import { normalizePath, Notice, TFile } from "obsidian";
+import { moment, normalizePath, Notice, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { deckCode, toCodeBlock } from "../data/DeckExport";
 import { allowedSyndicates } from "../data/DeckRules";
 import { MatchFormat, ROUNDS_BLOCK } from "../data/tournament";
 import { Deck } from "../data/types";
+import { fillTemplate } from "./fillTemplate";
 
 export type TemplateKind = "deck" | "tournament";
 
@@ -12,10 +13,17 @@ export const TEMPLATE_FILE_NAMES: Record<TemplateKind, string> = {
 	tournament: "Tournament report.md",
 };
 
+/** Obsidian's moment, for core Templates date formats (its typings don't declare the call). */
+const clock = moment as unknown as (input?: string, format?: string, strict?: boolean) => { isValid(): boolean; format(pattern: string): string };
+
+/** The setting holding each note type's chosen template note (a path, "" for none). */
+export const TEMPLATE_SETTINGS = { deck: "deckTemplate", tournament: "tournamentTemplate" } as const;
+
 /**
- * Built-in note templates. Users can override any of them by putting a file
- * with the same name (see TEMPLATE_FILE_NAMES) in the configured template
- * folder. Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}}
+ * Built-in note templates. Users can replace them with a note of their own:
+ * the one chosen in the settings for that note type (from anywhere in the
+ * vault), else a file with the name in TEMPLATE_FILE_NAMES in the template
+ * folder. Obsidian's core Templates placeholders work too (see fillTemplate). Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}}
  * {{syndicates}}, and for tournament reports {{event}} {{format}} {{roundCount}}
  * {{decks}} {{deckLinks}} {{decklists}} {{rounds}} ({{deckLink}} is the first deck).
  * {{rounds}} is the live view of the event's games (a chrono-matches block):
@@ -137,10 +145,23 @@ export class NoteTemplates {
 			roundCount: vars.rounds ? String(vars.rounds) : "",
 			rounds: ROUNDS_BLOCK,
 		};
-		return template.replace(/\{\{(\w+)\}\}/g, (m, key: string) => (key in values ? values[key] : m));
+		const date = clock(values.date, "YYYY-MM-DD", true);
+		return fillTemplate(template, values, (pattern, which) => (which === "date" && date.isValid() ? date : clock()).format(pattern));
 	}
 
+	/**
+	 * The user's template for `kind`: the note chosen in the settings, else the
+	 * file named after the note type in the template folder; null for the built-in one.
+	 * A chosen note that no longer exists falls back to the built-in template, with a notice.
+	 */
 	private async readUserTemplate(kind: TemplateKind): Promise<string | null> {
+		const chosen = this.plugin.settings[TEMPLATE_SETTINGS[kind]].trim();
+		if (chosen) {
+			const file = this.plugin.app.vault.getFileByPath(normalizePath(chosen));
+			if (file) return this.plugin.app.vault.read(file);
+			new Notice(`ChronoVault: the template note “${chosen}” was not found, so the built-in template was used. Pick another one in the settings.`);
+			return null;
+		}
 		const folder = this.plugin.settings.templateFolder.trim();
 		if (!folder) return null;
 		const file = this.plugin.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${TEMPLATE_FILE_NAMES[kind]}`));
