@@ -2,7 +2,8 @@ import { debounce, MarkdownRenderChild, setIcon, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { deckNoteFrontmatter } from "../templates/DeckNoteSync";
 import { RecordMatchModal } from "../tracker/RecordMatchModal";
-import { formatRecord, groupRecords, pairingLabel, parseTypes, typeLabel } from "../data/matches";
+import { renderTextWithCardRefs } from "./InlineCardRef";
+import { formatRecord, groupRecords, pairingLabel, parseTypes, tally, typeLabel } from "../data/matches";
 import { matchRecord, roundResults, TOURNAMENT_NOTE_TYPE } from "../data/tournament";
 import { LoggedGame } from "../tracker/MatchLog";
 import { pairingFromLabel, renderFormStrip, renderKpis, renderPairing, renderRecordTable, renderResultChip } from "../tracker/MatchWidgets";
@@ -73,26 +74,21 @@ class MatchesBlock extends MarkdownRenderChild {
 		const log = bar.createEl("button", { cls: "mod-cta" });
 		setIcon(log.createSpan(), "plus");
 		log.appendText(" Log a game");
-		log.addEventListener("click", () => new RecordMatchModal(this.plugin, deck).open());
+		log.addEventListener("click", () => new RecordMatchModal(this.plugin, deck, undefined, report ?? undefined).open());
 		const open = bar.createEl("button");
 		setIcon(open.createSpan(), "trophy");
 		open.appendText(" Open match tracker");
-		open.addEventListener("click", () => void this.plugin.activateMatchTracker(deck));
+		open.addEventListener("click", () => void this.plugin.activateMatchTracker(deck, report));
 
 		if (this.types.length) {
 			const names = this.types.map((t) => logged.find((g) => typeLabel(g.match).toLowerCase() === t)?.match.type || this.plugin.settings.matchTypes.find((m) => m.name.toLowerCase() === t)?.name || t);
 			el.createDiv({ cls: "chrono-match-hint", text: `Type: ${names.join(", ")}` });
 		}
+		if (report) return this.renderReport(report, games);
 		if (!games.length) {
-			const none = deck
-				? "No games logged for this deck yet."
-				: report
-					? "No games logged for this tournament yet. Log a game with a tournament type and pick this report as the event."
-					: "No games logged yet.";
-			el.createDiv({ cls: "chrono-match-hint", text: none });
+			el.createDiv({ cls: "chrono-match-hint", text: deck ? "No games logged for this deck yet." : "No games logged yet." });
 			return;
 		}
-		if (report) return this.renderReport(report, games);
 		const matches = games.map((g) => g.match);
 		renderKpis(el, matches);
 		const strip = el.createDiv({ cls: "chrono-tracker-strip" });
@@ -107,42 +103,72 @@ class MatchesBlock extends MarkdownRenderChild {
 		}
 	}
 
-	/** A tournament report's games: the record, the match of each round and the record of each deck. */
+	/**
+	 * A tournament report's rounds, from the games logged for it: the match and
+	 * game records, then a row per round (planned rounds not played yet included)
+	 * with the opponent, the deck, the games and their notes, and the result.
+	 */
 	private renderReport(report: TFile, games: LoggedGame[]): void {
 		const el = this.containerEl;
+		const info = this.plugin.matchLog.reportInfo(report);
 		const matches = games.map((g) => g.match);
-		const format = this.plugin.matchLog.eventFormat(report);
-		const rounds = roundResults(matches, format);
-		renderKpis(el, matches);
-		if (rounds.length) {
-			const matchesWon = matchRecord(rounds);
-			const going = rounds.filter((r) => r.result === null).length;
-			const summary = [format ? `${format}, matches ${formatRecord(matchesWon)}` : "No format in the report's properties", going && format ? `${going} round${going === 1 ? "" : "s"} still going` : ""];
-			el.createDiv({ cls: "chrono-match-hint", text: summary.filter(Boolean).join(" · ") });
+		// Without a format, rounds count as Bo1, like the round the form suggests and the `record` written.
+		const rounds = roundResults(matches, info.format ?? "Bo1");
+		const hint = (text: string) => el.createDiv({ cls: "chrono-match-hint", text });
+		if (!info.format) hint("No format property (Bo1, Bo3 or Bo5) in this report: rounds are counted as Bo1.");
 
-			const table = el.createDiv({ cls: "chrono-match-table-wrap" }).createEl("table", { cls: "chrono-match-table chrono-match-rounds" });
-			const head = table.createEl("thead").createEl("tr");
-			for (const h of ["Round", "Deck", "Opponent", "Games", "Result"]) head.createEl("th", { text: h });
-			const body = table.createEl("tbody");
-			for (const r of rounds) {
-				const roundGames = games.filter((g) => g.match.round === r.round);
-				const tr = body.createEl("tr");
-				tr.createEl("td", { cls: "chrono-match-num", text: String(r.round) });
-				tr.createEl("td", { text: Array.from(new Set(roundGames.map((g) => g.deckName))).join(", ") });
-				// The opponent's syndicates of the round's games (the same player, usually the same deck).
-				const pairings = Array.from(new Set(roundGames.map((g) => pairingLabel(g.match.opponent))));
-				const opp = tr.createEl("td");
-				for (const p of pairings) renderPairing(opp, pairingFromLabel(p));
-				renderFormStrip(tr.createEl("td"), r.games, r.games.length);
-				const result = tr.createEl("td", { cls: "chrono-match-num" });
-				if (r.result) renderResultChip(result, r.result);
-				result.appendText(` ${formatRecord(r.record)}`);
+		const kpis = el.createDiv({ cls: "chrono-match-kpis" });
+		const kpi = (label: string, value: string) => {
+			const k = kpis.createDiv({ cls: "chrono-match-kpi" });
+			k.createDiv({ cls: "chrono-match-kpi-value", text: value });
+			k.createDiv({ cls: "chrono-match-kpi-label", text: label });
+		};
+		kpi("Matches", formatRecord(matchRecord(rounds)));
+		kpi("Games", formatRecord(tally(matches)));
+		if (info.format) kpi("Format", info.format);
+		const played = rounds.length ? rounds[rounds.length - 1].round : 0;
+		if (info.rounds) kpi("Rounds", `${Math.min(played, info.rounds)} of ${info.rounds}`);
+
+		const last = Math.max(played, info.rounds ?? 0);
+		if (!last) {
+			hint("No games logged for this tournament yet. Use “Log a game” above: its event is this report.");
+			return;
+		}
+		const table = el.createDiv({ cls: "chrono-match-table-wrap" }).createEl("table", { cls: "chrono-match-table chrono-match-rounds" });
+		const head = table.createEl("thead").createEl("tr");
+		for (const h of ["Round", "Opponent", "Deck", "Games", "Result", "Notes"]) head.createEl("th", { text: h });
+		const body = table.createEl("tbody");
+		for (let n = 1; n <= last; n++) {
+			const r = rounds.find((x) => x.round === n);
+			const roundGames = games.filter((g) => g.match.round === n);
+			const tr = body.createEl("tr");
+			tr.createEl("td", { cls: "chrono-match-num", text: String(n) });
+			if (!r) {
+				tr.addClass("is-empty");
+				tr.createEl("td", { cls: "chrono-match-hint", text: "Not played yet", attr: { colspan: "5" } });
+				continue;
 			}
+			// The same player all round, usually with the same deck.
+			const opp = tr.createEl("td");
+			const players = unique(roundGames.map((g) => g.match.player));
+			if (players.length) opp.createSpan({ cls: "chrono-match-player", text: players.join(", ") });
+			for (const p of unique(roundGames.map((g) => pairingLabel(g.match.opponent)))) renderPairing(opp, pairingFromLabel(p), !players.length);
+			tr.createEl("td", { text: unique(roundGames.map((g) => g.deckName)).join(", ") });
+			renderFormStrip(tr.createEl("td"), r.games, r.games.length);
+			const result = tr.createEl("td", { cls: "chrono-match-num" });
+			if (r.result) renderResultChip(result, r.result);
+			result.appendText(` ${formatRecord(r.record)}${r.result ? "" : ", going"}`);
+			const notes = tr.createEl("td", { cls: "chrono-match-note" });
+			renderTextWithCardRefs(this.plugin, notes, roundGames.map((g) => g.match.note).filter(Boolean).join(" · "));
 		}
 		const noRound = games.filter((g) => !g.match.round).length;
-		if (noRound) el.createDiv({ cls: "chrono-match-hint", text: `${noRound} game${noRound === 1 ? "" : "s"} without a round.` });
+		if (noRound) hint(`${noRound} game${noRound === 1 ? "" : "s"} without a round (not in the table, counted in Games).`);
 
 		const decks = groupRecords(games, (g) => g.deckName, (g) => g.match);
 		if (decks.length > 1) renderRecordTable(el, ["Deck"], decks.map((d) => ({ label: (td) => void td.setText(d.key), record: d.record })));
 	}
+}
+
+function unique(values: string[]): string[] {
+	return Array.from(new Set(values.filter(Boolean)));
 }

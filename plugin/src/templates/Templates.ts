@@ -2,7 +2,7 @@ import { normalizePath, Notice, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
 import { deckCode, toCodeBlock } from "../data/DeckExport";
 import { allowedSyndicates } from "../data/DeckRules";
-import { MatchFormat, tournamentRounds } from "../data/tournament";
+import { MatchFormat, ROUNDS_BLOCK } from "../data/tournament";
 import { Deck } from "../data/types";
 
 export type TemplateKind = "deck" | "tournament";
@@ -16,8 +16,10 @@ export const TEMPLATE_FILE_NAMES: Record<TemplateKind, string> = {
  * Built-in note templates. Users can override any of them by putting a file
  * with the same name (see TEMPLATE_FILE_NAMES) in the configured template
  * folder. Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}}
- * {{syndicates}}, and for tournament reports {{event}} {{format}} {{decks}}
- * {{deckLinks}} {{decklists}} {{rounds}} ({{deckLink}} is the first deck).
+ * {{syndicates}}, and for tournament reports {{event}} {{format}} {{roundCount}}
+ * {{decks}} {{deckLinks}} {{decklists}} {{rounds}} ({{deckLink}} is the first deck).
+ * {{rounds}} is the live view of the event's games (a chrono-matches block):
+ * the games are kept in the match log, the plugin never edits a report's body.
  */
 export const DEFAULT_TEMPLATES: Record<TemplateKind, string> = {
 	deck: `---
@@ -61,6 +63,7 @@ type: chrono-tournament
 event: "{{event}}"
 date: {{date}}
 format: {{format}}
+rounds: {{roundCount}}
 decks: [{{decks}}]
 record: 0-0
 placement:
@@ -74,12 +77,9 @@ placement:
 
 ## Decklists
 {{decklists}}
-## Results
-\`\`\`chrono-matches
-\`\`\`
-
 ## Rounds
 {{rounds}}
+
 ## Takeaways
 - What worked:
 - What didn't:
@@ -134,7 +134,8 @@ export class NoteTemplates {
 			decks: decks.map((d) => yamlQuote(d.link)).join(", "),
 			deckLinks: decks.map((d) => d.link).join(", "),
 			decklists: decks.map((d) => `### ${d.link}\n${d.deck ? toCodeBlock(d.deck, cards) : ""}`).join("\n"),
-			rounds: vars.format ? tournamentRounds(vars.format, vars.rounds ?? 3) : "",
+			roundCount: vars.rounds ? String(vars.rounds) : "",
+			rounds: ROUNDS_BLOCK,
 		};
 		return template.replace(/\{\{(\w+)\}\}/g, (m, key: string) => (key in values ? values[key] : m));
 	}
@@ -146,8 +147,8 @@ export class NoteTemplates {
 		return file instanceof TFile ? this.plugin.app.vault.read(file) : null;
 	}
 
-	/** Create a note in the configured folder and open it. */
-	async createNote(kind: TemplateKind, vars: TemplateVars, subfolder: string): Promise<TFile | null> {
+	/** Create a note in the configured folder and open it (unless `open` is false). */
+	async createNote(kind: TemplateKind, vars: TemplateVars, subfolder: string, open = true): Promise<TFile | null> {
 		try {
 			const body = await this.render(kind, vars);
 			const folder = normalizePath([this.plugin.settings.notesFolder.trim(), subfolder].filter(Boolean).join("/"));
@@ -157,7 +158,7 @@ export class NoteTemplates {
 			const base = sanitizeFileName(vars.name) || "Untitled";
 			const path = await uniquePath(this.plugin, folder, base);
 			const file = await this.plugin.app.vault.create(path, body);
-			await this.plugin.app.workspace.getLeaf("tab").openFile(file);
+			if (open) await this.plugin.app.workspace.getLeaf("tab").openFile(file);
 			return file;
 		} catch (err) {
 			new Notice(`ChronoVault: could not create note — ${(err as Error).message}`);
@@ -165,8 +166,8 @@ export class NoteTemplates {
 		}
 	}
 
-	createDeckNote(deck: Deck): Promise<TFile | null> {
-		return this.createNote("deck", { name: deck.name || "Untitled deck", deck }, "Decks");
+	createDeckNote(deck: Deck, open = true): Promise<TFile | null> {
+		return this.createNote("deck", { name: deck.name || "Untitled deck", deck }, "Decks", open);
 	}
 
 	createTournamentNote(event: string, date: string, format: MatchFormat, rounds: number, decks: TournamentDeck[]): Promise<TFile | null> {

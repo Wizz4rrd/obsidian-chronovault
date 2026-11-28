@@ -54,12 +54,12 @@ export class TournamentModal extends Modal {
 		});
 		new Setting(contentEl)
 			.setName("Format")
-			.setDesc("Games per match: a row is added for each one.")
+			.setDesc("Games per match: decides who wins each round.")
 			.addDropdown((d) => {
 				for (const f of MATCH_FORMATS) d.addOption(f, f === "Bo1" ? "Best of 1" : f === "Bo3" ? "Best of 3" : "Best of 5");
 				d.setValue(this.format).onChange((v) => (this.format = v as MatchFormat));
 			});
-		new Setting(contentEl).setName("Rounds").addSlider((s) =>
+		new Setting(contentEl).setName("Rounds").setDesc("Planned rounds: the ones not played yet show as empty rows.").addSlider((s) =>
 			s
 				.setLimits(1, 12, 1)
 				.setValue(this.rounds)
@@ -96,7 +96,7 @@ export class TournamentModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Deck codes")
-			.setDesc("For decks you don't have a note for: paste their codes, one per line.")
+			.setDesc("For decks you don't have a note for: paste their codes, one per line. Each gets a deck note, so you can log its games.")
 			.addTextArea((t) => {
 				t.setPlaceholder("Deck code\nDeck code").onChange((v) => {
 					this.codes = v;

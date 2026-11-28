@@ -35,6 +35,12 @@ export interface TournamentFields {
 	/** The event cell for a report (a link). */
 	cell: (report: TFile) => string;
 	suggestRound: (report: TFile) => number;
+	/** Where a round stands, e.g. "Round 3 of 5: 1–1 so far". */
+	status: (report: TFile, round: number) => string;
+	/** The opponent's name in a round, from its games already logged. */
+	player: (report: TFile, round: number) => string;
+	/** The deck notes the report lists. */
+	decks: (report: TFile) => TFile[];
 }
 
 let formCount = 0;
@@ -49,7 +55,6 @@ const RAW_EVENT = "\u0000raw";
  */
 export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { focus: () => void } {
 	const form = parent.createDiv({ cls: "chrono-match-form" });
-	let deck: TFile | null = opts.deck ?? opts.decks[0] ?? null;
 	let opponent: Syndicate[] = (opts.initial?.opponent ?? []).slice();
 
 	const row = (label: string, parent: HTMLElement = form) => {
@@ -57,17 +62,6 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 		r.createDiv({ cls: "chrono-match-label", text: label });
 		return r.createDiv({ cls: "chrono-match-field" });
 	};
-
-	if (!opts.lockDeck) {
-		const field = row("Deck");
-		if (!opts.decks.length) field.createSpan({ cls: "chrono-match-hint", text: "No deck notes yet. Create one with “New deck note”." });
-		else {
-			const select = field.createEl("select", { cls: "dropdown" });
-			for (const f of opts.decks) select.createEl("option", { text: f.basename, value: f.path });
-			if (deck) select.value = deck.path;
-			select.addEventListener("change", () => (deck = opts.decks.find((f) => f.path === select.value) ?? null));
-		}
-	}
 
 	// Type: the settings' types, plus the game's own when editing one whose type isn't in them.
 	let type = opts.initial?.type ?? "";
@@ -85,11 +79,12 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 		});
 	}
 
-	// Event and round, shown for a tournament type, and kept when editing a game whose
-	// type isn't one but that has an event anyway (e.g. typed by hand in the log).
+	// Event, round and the opponent's name, shown for a tournament type, and kept when editing
+	// a game whose type isn't one but that has an event anyway (e.g. typed by hand in the log).
 	const tour = opts.tournament;
 	const initialEvent = opts.initial?.event ?? "";
-	const keepEvent = !!opts.editing && !!(initialEvent || opts.initial?.round) && !tour.isType(opts.initial?.type ?? "");
+	const keepEvent = !!opts.editing && !!(initialEvent || opts.initial?.round || opts.initial?.player) && !tour.isType(opts.initial?.type ?? "");
+	const showEvent = () => tour.isType(type) || keepEvent;
 	const eventBox = form.createDiv({ cls: "chrono-match-event" });
 	const eventField = row("Event", eventBox);
 	const event = eventField.createEl("select", { cls: "dropdown", attr: { "aria-label": "Tournament report" } });
@@ -100,29 +95,70 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 	if (initialEvent && !initialReport) event.createEl("option", { value: RAW_EVENT, text: initialEvent });
 	event.value = initialReport?.path ?? (initialEvent ? RAW_EVENT : "");
 	if (!tour.reports.length) eventField.createDiv({ cls: "chrono-match-hint", text: "No tournament reports yet. Create one with “New tournament report”." });
-	const report = (): TFile | null => (event.value && event.value !== RAW_EVENT ? (tour.reports.find((f) => f.path === event.value) ?? initialReport) : null);
-	const round = row("Round", eventBox).createEl("input", { type: "number", cls: "chrono-match-input chrono-match-round", attr: { min: "1", step: "1", placeholder: "1" } });
-	const suggest = () => {
-		const r = report();
-		round.value = r ? String(tour.suggestRound(r)) : "";
-	};
-	if (opts.editing) round.value = opts.initial?.round ? String(opts.initial.round) : "";
-	else suggest();
-	event.addEventListener("change", suggest);
-	const showEvent = () => tour.isType(type) || keepEvent;
+	const report = (): TFile | null => (showEvent() && event.value && event.value !== RAW_EVENT ? (tour.reports.find((f) => f.path === event.value) ?? initialReport) : null);
 	const eventCell = (): string => {
 		if (!showEvent()) return "";
 		if (event.value === RAW_EVENT) return initialEvent;
 		const r = report();
 		return r ? tour.cell(r) : "";
 	};
+
+	const roundField = row("Round", eventBox);
+	const round = roundField.createEl("input", { type: "number", cls: "chrono-match-input chrono-match-round", attr: { min: "1", step: "1", placeholder: "1" } });
+	const roundHint = roundField.createSpan({ cls: "chrono-match-hint chrono-match-round-status" });
+	const roundNumber = () => Math.max(0, Math.floor(Number(round.value))) || null;
+	const player = row("Player", eventBox).createEl("input", { type: "text", cls: "chrono-match-input", attr: { placeholder: "Opponent's name, optional" } });
+	player.value = opts.initial?.player ?? "";
+	// The name is filled in from the round's earlier games, until it's typed by hand.
+	let playerTyped = !!opts.editing;
+	player.addEventListener("input", () => (playerTyped = true));
+	const syncRound = () => {
+		const r = report();
+		const n = roundNumber();
+		roundHint.setText(r && n ? tour.status(r, n) : "");
+		if (!playerTyped) player.value = r && n ? tour.player(r, n) : "";
+	};
+	const suggest = () => {
+		const r = report();
+		round.value = r ? String(tour.suggestRound(r)) : "";
+		syncRound();
+	};
+	round.addEventListener("input", syncRound);
+	event.addEventListener("change", () => {
+		if (!opts.editing) playerTyped = false;
+		suggest();
+		fillDecks();
+	});
+
+	// Deck: for a tournament game, the decks the report lists (when it lists any).
+	const deckField = opts.lockDeck ? null : row("Deck");
+	let deck: TFile | null = opts.deck ?? null;
+	function fillDecks(): void {
+		const r = report();
+		const brought = r ? tour.decks(r) : [];
+		const list = brought.length ? brought.slice() : opts.decks.slice();
+		// A game being edited keeps its deck, even if the report doesn't list it.
+		if (opts.editing && deck && !list.includes(deck)) list.push(deck);
+		if (!opts.lockDeck && (!deck || !list.includes(deck))) deck = list[0] ?? null;
+		if (!deckField) return;
+		deckField.empty();
+		if (!list.length) return void deckField.createSpan({ cls: "chrono-match-hint", text: "No deck notes yet. Create one with “New deck note”." });
+		const select = deckField.createEl("select", { cls: "dropdown", attr: { "aria-label": "Deck" } });
+		for (const f of list) select.createEl("option", { text: f.basename, value: f.path });
+		if (deck) select.value = deck.path;
+		select.addEventListener("change", () => (deck = list.find((f) => f.path === select.value) ?? null));
+		if (brought.length) deckField.createDiv({ cls: "chrono-match-hint", text: "The decks listed in the tournament report." });
+	}
+
 	function syncType(): void {
 		// The newest report is most likely the one being played.
-		if (tour.isType(type) && !event.value && tour.reports.length && !opts.editing) {
-			event.value = tour.reports[0].path;
-			suggest();
-		}
+		if (tour.isType(type) && !event.value && tour.reports.length && !opts.editing) event.value = tour.reports[0].path;
 		eventBox.toggle(showEvent());
+		if (opts.editing) {
+			round.value = opts.initial?.round ? String(opts.initial.round) : "";
+			syncRound();
+		} else suggest();
+		fillDecks();
 	}
 	syncType();
 
@@ -200,7 +236,8 @@ export function renderMatchForm(parent: HTMLElement, opts: MatchFormOptions): { 
 			opponentDeck: unwrapDeckCode(code.value).replace(/\s+/g, ""),
 			type,
 			event: eventCell(),
-			round: showEvent() ? Math.max(0, Math.floor(Number(round.value))) || null : null,
+			round: showEvent() ? roundNumber() : null,
+			player: showEvent() ? player.value.trim().replace(/\s+/g, " ") : "",
 			note: note.value.trim(),
 		});
 		if (!opts.editing) {

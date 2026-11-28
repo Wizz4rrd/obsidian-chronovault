@@ -1,6 +1,6 @@
 import { Modal, TFile } from "obsidian";
 import type ChronoVaultPlugin from "../../main";
-import { comparePatches, linkTarget, Match } from "../data/matches";
+import { comparePatches, Match } from "../data/matches";
 import { LoggedGame } from "./MatchLog";
 import { MatchFormOptions, renderMatchForm } from "./MatchForm";
 
@@ -15,25 +15,27 @@ export function matchFormOptions(plugin: ChronoVaultPlugin, games: LoggedGame[])
 		tournament: {
 			isType: (type) => plugin.isTournamentType(type),
 			reports: plugin.tournamentNotes(),
-			resolve: (cell) => {
-				const target = linkTarget(cell);
-				return target ? plugin.app.metadataCache.getFirstLinkpathDest(target, log.path) : null;
-			},
+			resolve: (cell) => log.resolveEvent(cell),
 			cell: (report) => log.linkCell(report),
 			suggestRound: (report) => log.suggestRound(games, report),
+			status: (report, round) => log.roundStatus(games, report, round),
+			player: (report, round) => log.roundPlayer(games, report, round),
+			decks: (report) => log.reportDecks(report),
 		},
 	};
 }
 
 /**
- * The match form in a modal: "Record match result" (new game, from anywhere)
- * or editing a game from the match tracker.
+ * The match form in a modal: "Record match result" (new game, from anywhere),
+ * editing a game from the match tracker, or logging a game of a tournament
+ * report (from the report, with its event and a tournament type preset).
  */
 export class RecordMatchModal extends Modal {
 	constructor(
 		private plugin: ChronoVaultPlugin,
 		private deck: TFile | null,
 		private editing?: LoggedGame,
+		private report?: TFile,
 	) {
 		super(plugin.app);
 	}
@@ -46,7 +48,7 @@ export class RecordMatchModal extends Modal {
 			...matchFormOptions(this.plugin, games),
 			decks: this.plugin.deckNotes(),
 			deck: this.editing?.file ?? this.deck ?? this.plugin.matchLog.lastDeck(games),
-			initial: this.editing?.match ?? this.plugin.matchLog.defaults(games),
+			initial: this.editing?.match ?? this.initial(games),
 			editing: !!this.editing,
 			onSubmit: async (file, match) => {
 				await this.save(file, match);
@@ -54,6 +56,10 @@ export class RecordMatchModal extends Modal {
 			},
 		});
 		form.focus();
+	}
+
+	private initial(games: LoggedGame[]): Partial<Match> {
+		return newGameDefaults(this.plugin, games, this.report ?? null);
 	}
 
 	private async save(file: TFile, match: Match): Promise<void> {
@@ -64,6 +70,14 @@ export class RecordMatchModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 	}
+}
+
+/** A new game's defaults; for a game of `report`, its event and a tournament type (the last one used, else the first). */
+export function newGameDefaults(plugin: ChronoVaultPlugin, games: LoggedGame[], report: TFile | null): Partial<Match> {
+	const defaults = plugin.matchLog.defaults(games);
+	if (!report) return defaults;
+	const type = plugin.isTournamentType(defaults.type ?? "") ? defaults.type : plugin.settings.matchTypes.find((t) => t.tournament)?.name;
+	return { ...defaults, type: type ?? defaults.type, event: plugin.matchLog.linkCell(report) };
 }
 
 export function uniqueArchetypes(names: string[]): string[] {

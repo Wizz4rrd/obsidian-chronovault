@@ -152,8 +152,8 @@ export interface GameRowOptions {
 }
 
 /**
- * One game: result, date, deck (when given), opponent, archetype, type, event
- * and round, patch and note (its `chrono:` refs as card references).
+ * One game: result, date, deck (when given), opponent, archetype, type, event,
+ * round and opponent's name, patch and note (its `chrono:` refs as card references).
  */
 export function renderGameRow(plugin: ChronoVaultPlugin, parent: HTMLElement, m: Match, opts: GameRowOptions = {}): HTMLElement {
 	const row = parent.createDiv({ cls: "chrono-match-game" });
@@ -164,8 +164,8 @@ export function renderGameRow(plugin: ChronoVaultPlugin, parent: HTMLElement, m:
 	renderPairing(row, m.opponent);
 	if (m.archetype) row.createSpan({ cls: "chrono-match-tag", text: m.archetype });
 	if (m.type) row.createSpan({ cls: "chrono-match-tag chrono-match-type-tag", text: m.type });
-	if (opts.eventName || m.round) {
-		const text = [opts.eventName, m.round ? `round ${m.round}` : ""].filter(Boolean).join(", ");
+	if (opts.eventName || m.round || m.player) {
+		const text = [opts.eventName, m.round ? `round ${m.round}` : "", m.player ? `vs ${m.player}` : ""].filter(Boolean).join(", ");
 		const tag = row.createSpan({ cls: "chrono-match-tag chrono-match-event-tag", text });
 		const report = opts.event;
 		if (report) {

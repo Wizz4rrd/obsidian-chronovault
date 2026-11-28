@@ -62,20 +62,41 @@ export function nextRound(games: Match[], format: MatchFormat | null): number {
 	return round && round.result === null ? last : last + 1;
 }
 
-/**
- * The "Rounds" section of a tournament report: one heading per round, with a
- * row per game (as many as a match can last) to note which deck was played.
- */
-export function tournamentRounds(format: MatchFormat, rounds: number): string {
-	const games = gamesPerMatch(format);
-	const out: string[] = [];
-	for (let r = 1; r <= Math.max(1, rounds); r++) {
-		out.push(`### Round ${r}`, "**Opponent:** ", games > 1 ? "**Result:** (e.g. 2-1)" : "**Result:** ", "");
-		out.push("| Game | My deck | Their deck | Result | On the play? | Notes |", "| --: | --- | --- | --- | --- | --- |");
-		for (let g = 1; g <= games; g++) out.push(`| ${g} |  |  |  |  |  |`);
-		out.push("");
-	}
-	return out.join("\n");
+/** Where a round stands, for the form: "New round", "1–1 so far" or "Won 2–0, finished". */
+export function roundStatus(games: Match[], format: MatchFormat | null, round: number): string {
+	const r = roundResults(games, format ?? "Bo1").find((x) => x.round === round);
+	if (!r) return "New round";
+	const score = `${r.record.wins}–${r.record.losses}`;
+	return r.result ? `${r.result === "W" ? "Won" : "Lost"} ${score}, finished` : `${score} so far`;
+}
+
+/** An event's match record ("3-1", for the report's `record` property); no format counts as Bo1. */
+export function eventRecord(games: Match[], format: MatchFormat | null): string {
+	const r = matchRecord(roundResults(games, format ?? "Bo1"));
+	return `${r.wins}-${r.losses}`;
+}
+
+/** What a report's "Rounds" section holds: the live view of its games (see MatchesCodeBlock). */
+export const ROUNDS_BLOCK = "```chrono-matches\n```";
+
+/** What the plugin reads from a tournament report's properties. */
+export interface ReportInfo {
+	/** Null when the `format` property is missing or not Bo1/Bo3/Bo5. */
+	format: MatchFormat | null;
+	/** Planned number of rounds (`rounds`), or null. */
+	rounds: number | null;
+	/** The decks brought (`decks`, or `deck` in older reports), as written: links or names. */
+	decks: string[];
+}
+
+export function reportInfo(fm: Record<string, unknown> | null | undefined): ReportInfo {
+	const rounds = Number(fm?.rounds);
+	const list = Array.isArray(fm?.decks) ? (fm.decks as unknown[]) : fm?.deck !== undefined ? [fm.deck] : [];
+	return {
+		format: parseFormat(fm?.format),
+		rounds: Number.isInteger(rounds) && rounds > 0 ? rounds : null,
+		decks: list.filter((d): d is string => typeof d === "string" && !!d.trim()).map((d) => d.trim()),
+	};
 }
 
 /** Decks pasted as codes (one per line), for decks that have no note. `invalid` lists the 1-based lines that aren't deck codes. */

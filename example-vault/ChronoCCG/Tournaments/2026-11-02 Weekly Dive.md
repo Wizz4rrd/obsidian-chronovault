@@ -3,7 +3,8 @@ type: chrono-tournament
 event: "Weekly Dive"
 date: 2026-11-02
 format: Bo3
-deck: "[[Somnus Revive]]"
+rounds: 4
+decks: ["[[Somnus Revive]]"]
 record: 3-1
 placement: 2nd
 ---
@@ -11,24 +12,18 @@ placement: 2nd
 
 **Event:** Weekly Dive
 **Date:** 2026-11-02
-**Deck:** [[Somnus Revive]]
+**Format:** Bo3
+**Decks:** [[Somnus Revive]]
 
-## Decklist
+## Decklists
+### [[Somnus Revive]]
 ```chrono-deck
 AUGVG33NNZ2XGICSMV3GS5TFBNRW63TTORZHKY3UMVSHUAACAEAAFBIBA4GGMAYMAMHAGCADNUBQEAYZAMBQGAQDAMBQEAYCAM
 ```
 
-## Results
+## Rounds
 ```chrono-matches
 ```
-
-## Rounds
-| Round | Opponent | Their deck | Result | Notes |
-| --: | --- | --- | --- | --- |
-| 1 | Player A | Sungrace aggro | W 2-1 | See Matchups in [[Somnus Revive]] |
-| 2 | Player B | Lifeblood midrange | W 2-0 |  |
-| 3 | Player C | Singularity control | W 2-1 | Long games |
-| 4 | Player D | Splintergleam tempo | L 0-2 | Need more early interaction |
 
 ## Takeaways
 - What worked: Fast-speed removal suite.

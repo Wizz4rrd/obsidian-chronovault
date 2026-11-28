@@ -7,7 +7,7 @@ import { renderSyndicateIcon } from "../ui/SyndicateIcon";
 import { LoggedGame } from "./MatchLog";
 import { renderMatchForm } from "./MatchForm";
 import { pairingFromLabel, renderFormStrip, renderGameRow, renderKpis, renderPairing, renderRateBar, renderRecordTable, renderWeeklyChart, syndicateRows } from "./MatchWidgets";
-import { matchFormOptions, RecordMatchModal, uniquePatches } from "./RecordMatchModal";
+import { matchFormOptions, newGameDefaults, RecordMatchModal, uniquePatches } from "./RecordMatchModal";
 
 export const VIEW_TYPE_MATCH_TRACKER = "chronovault-match-tracker";
 
@@ -31,6 +31,8 @@ export class MatchTrackerView extends ItemView {
 	private deckFilter = "";
 	/** Match.type, NO_TYPE for games without one, or "" for every type. */
 	private typeFilter = "";
+	/** LoggedGame.eventKey, or "" for every game. */
+	private eventFilter = "";
 	/** Opponent's syndicates to show games against: none = all, one = any game against it, two = that pair. */
 	private vs: Syndicate[] = [];
 	private showAllGames = false;
@@ -69,6 +71,13 @@ export class MatchTrackerView extends ItemView {
 		await this.render();
 	}
 
+	/** Show the games of a tournament report (every deck). */
+	focusEvent(report: TFile): void {
+		this.deckFilter = "";
+		this.eventFilter = report.path;
+		void this.render();
+	}
+
 	/** Show one deck's page, with the deck preselected in the form; null shows every deck. */
 	focusDeck(file: TFile | null): void {
 		this.formDeck = file;
@@ -86,6 +95,7 @@ export class MatchTrackerView extends ItemView {
 				(!this.patchFilter || g.match.patch === this.patchFilter) &&
 				(!this.deckFilter || g.deckKey === this.deckFilter) &&
 				(!this.typeFilter || typeLabel(g.match) === this.typeFilter) &&
+				(!this.eventFilter || g.eventKey === this.eventFilter) &&
 				matchesVs(g.match.opponent, this.vs),
 		);
 
@@ -107,7 +117,8 @@ export class MatchTrackerView extends ItemView {
 			...matchFormOptions(this.plugin, all),
 			decks,
 			deck: this.app.vault.getFileByPath(this.deckFilter) ?? this.formDeck ?? this.plugin.matchLog.lastDeck(all),
-			initial: this.plugin.matchLog.defaults(all),
+			// Showing a tournament's games: the next one is played in it.
+			initial: newGameDefaults(this.plugin, all, this.eventFilter ? this.app.vault.getFileByPath(this.eventFilter) : null),
 			onSubmit: async (file, match) => {
 				this.formDeck = file;
 				await this.plugin.matchLog.add(file, match);
@@ -210,6 +221,22 @@ export class MatchTrackerView extends ItemView {
 			select("Type", [["", "All types"], ...options], this.typeFilter, (v) => (this.typeFilter = v));
 		}
 
+		// Events: those of the games, newest first by date.
+		const events = new Map<string, { name: string; date: string }>();
+		for (const g of all) {
+			if (!g.eventKey) continue;
+			const e = events.get(g.eventKey);
+			if (!e) events.set(g.eventKey, { name: g.eventName, date: g.match.date });
+			else if (g.match.date > e.date) e.date = g.match.date;
+		}
+		if (this.eventFilter && !events.has(this.eventFilter)) events.set(this.eventFilter, { name: this.app.vault.getFileByPath(this.eventFilter)?.basename ?? this.eventFilter, date: "" });
+		if (events.size) {
+			const options = Array.from(events)
+				.sort((a, b) => b[1].date.localeCompare(a[1].date) || a[1].name.localeCompare(b[1].name))
+				.map(([key, e]): [string, string] => [key, e.name]);
+			select("Event", [["", "All events"], ...options], this.eventFilter, (v) => (this.eventFilter = v));
+		}
+
 		// Vs: the opponent's syndicates, picked like in the form (two at most).
 		const vs = filters.createDiv({ cls: "chrono-tracker-vs", attr: { role: "group", "aria-label": "Opponent's syndicates" } });
 		vs.createSpan({ cls: "chrono-match-hint", text: "Vs" });
@@ -220,12 +247,12 @@ export class MatchTrackerView extends ItemView {
 			b.addEventListener("click", () => this.apply(() => (this.vs = on ? this.vs.filter((x) => x !== s) : [...this.vs, s].slice(-2))));
 		}
 
-		if (this.deckFilter || this.vs.length || this.patchFilter || this.typeFilter || this.period !== "all") {
+		if (this.deckFilter || this.vs.length || this.patchFilter || this.typeFilter || this.eventFilter || this.period !== "all") {
 			const clear = filters.createEl("button", { text: "Clear filters" });
 			clear.addEventListener("click", () =>
 				this.apply(() => {
 					this.period = "all";
-					this.deckFilter = this.patchFilter = this.typeFilter = "";
+					this.deckFilter = this.patchFilter = this.typeFilter = this.eventFilter = "";
 					this.vs = [];
 				}),
 			);

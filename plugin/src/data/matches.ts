@@ -15,10 +15,10 @@ import { Syndicate, SYNDICATES } from "./types";
  */
 export const LOG_COLUMNS = ["Date", "Patch", "Deck", "Result", "Opponent", "Archetype", "Opponent deck", "Type", "Note"];
 
-/** Columns of tournament games (the report and the round), added to the table with the first game that has them. */
-export const EVENT_COLUMNS = ["Event", "Round"];
+/** Columns of tournament games (the report, the round and the opponent's name), added to the table with the first game that has them. */
+export const EVENT_COLUMNS = ["Event", "Round", "Player"];
 
-type Field = "date" | "patch" | "deck" | "result" | "opponent" | "archetype" | "opponentDeck" | "type" | "event" | "round" | "note";
+type Field = "date" | "patch" | "deck" | "result" | "opponent" | "archetype" | "opponentDeck" | "type" | "event" | "round" | "player" | "note";
 
 const FIELD_NAMES: Record<Field, string[]> = {
 	date: ["date"],
@@ -31,6 +31,7 @@ const FIELD_NAMES: Record<Field, string[]> = {
 	type: ["type", "game type", "mode"],
 	event: ["event", "tournament"],
 	round: ["round"],
+	player: ["player", "opponent player", "opponent name"],
 	note: ["note", "notes"],
 };
 
@@ -59,6 +60,8 @@ export interface Match {
 	event: string;
 	/** Round of the tournament, from 1; null when not noted. */
 	round: number | null;
+	/** The opponent's name, for tournament games, or "". */
+	player: string;
 	note: string;
 }
 
@@ -162,6 +165,7 @@ export function parseLog(text: string): { rows: LogRow[]; invalid: number[] } {
 				type: get("type"),
 				event: get("event"),
 				round: parseRound(get("round")),
+				player: get("player"),
 				note: get("note"),
 			},
 		});
@@ -190,6 +194,7 @@ export function formatLogRow(deck: string, m: Match, columns: string[] = LOG_COL
 		type: m.type,
 		event: m.event,
 		round: m.round ? String(m.round) : "",
+		player: m.player,
 		note: m.note,
 	};
 	const cells = columns.map((c, i) => {
@@ -210,7 +215,7 @@ export function logColumns(text: string): string[] {
 
 /** The columns `m` needs beyond LOG_COLUMNS: the event ones for a tournament game. */
 export function extraColumns(m: Match): string[] {
-	return m.event || m.round ? EVENT_COLUMNS : [];
+	return m.event || m.round || m.player ? EVENT_COLUMNS : [];
 }
 
 /**

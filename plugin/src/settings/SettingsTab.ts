@@ -218,7 +218,7 @@ export class ChronoSettingsTab extends PluginSettingTab {
 						desc:
 							'Optional. "Deck.md" and "Tournament report.md" files in this folder replace the built-in templates. ' +
 							"Placeholders: {{name}} {{date}} {{deck}} {{code}} {{divers}} {{syndicates}}; in tournament reports also " +
-							"{{event}} {{format}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}}.",
+							"{{event}} {{format}} {{roundCount}} {{decks}} {{deckLinks}} {{decklists}} {{rounds}} (the live rounds of the event).",
 						control: { type: "folder", key: "templateFolder", placeholder: "ChronoCCG/Templates" },
 					},
 					{

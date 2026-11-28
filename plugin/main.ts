@@ -1,4 +1,4 @@
-import { MarkdownView, normalizePath, Notice, Plugin, TFile, Vault, WorkspaceLeaf } from "obsidian";
+import { debounce, MarkdownView, normalizePath, Notice, Plugin, TFile, Vault, WorkspaceLeaf } from "obsidian";
 import { CardRepository } from "./src/data/CardRepository";
 import { DataSync } from "./src/data/DataSync";
 import { SEED_DATABASE } from "./src/data/cards.seed";
@@ -57,6 +57,11 @@ export default class ChronoVaultPlugin extends Plugin {
 		const legacyCache = cached?.source === "runeterra.ar" && this.settings.dataSource === "official";
 
 		this.addSettingTab(new ChronoSettingsTab(this.app, this));
+
+		// Tournament reports' `record` follows the match log, also when it's edited by hand or a report's format changes.
+		const syncRecords = debounce(() => void this.matchLog.syncRecords(), 1000, true);
+		this.registerEvent(this.app.vault.on("modify", (file) => file.path === this.matchLog.path && syncRecords()));
+		this.registerEvent(this.app.metadataCache.on("changed", (_file, _data, cache) => cache.frontmatter?.type === TOURNAMENT_NOTE_TYPE && syncRecords()));
 
 		// Markdown rendering
 		registerCardCodeBlock(this);
@@ -209,7 +214,9 @@ export default class ChronoVaultPlugin extends Plugin {
 			name: "Record match result…",
 			callback: () => {
 				const active = this.app.workspace.getActiveFile();
-				new RecordMatchModal(this, this.deckNotes().find((f) => f === active) ?? null).open();
+				// From a tournament report, the game is one of its games.
+				const report = this.tournamentNotes().find((f) => f === active);
+				new RecordMatchModal(this, this.deckNotes().find((f) => f === active) ?? null, undefined, report).open();
 			},
 		});
 
@@ -218,7 +225,7 @@ export default class ChronoVaultPlugin extends Plugin {
 			name: "Open match tracker",
 			callback: () => {
 				const active = this.app.workspace.getActiveFile();
-				void this.activateMatchTracker(this.deckNotes().find((f) => f === active) ?? null);
+				void this.activateMatchTracker(this.deckNotes().find((f) => f === active) ?? null, this.tournamentNotes().find((f) => f === active) ?? null);
 			},
 		});
 
@@ -279,8 +286,8 @@ export default class ChronoVaultPlugin extends Plugin {
 		return view instanceof DeckBuilderView ? view : null;
 	}
 
-	/** Open the match tracker, with `deck` preselected in its form when given. */
-	async activateMatchTracker(deck: TFile | null = null): Promise<void> {
+	/** Open the match tracker: on `deck`'s page, or filtered to the games of tournament `report`, when given. */
+	async activateMatchTracker(deck: TFile | null = null, report: TFile | null = null): Promise<void> {
 		const { workspace } = this.app;
 		let leaf = workspace.getLeavesOfType(VIEW_TYPE_MATCH_TRACKER)[0];
 		if (!leaf) {
@@ -288,7 +295,9 @@ export default class ChronoVaultPlugin extends Plugin {
 			await leaf.setViewState({ type: VIEW_TYPE_MATCH_TRACKER, active: true });
 		}
 		await workspace.revealLeaf(leaf);
-		if (deck && leaf.view instanceof MatchTrackerView) leaf.view.focusDeck(deck);
+		if (!(leaf.view instanceof MatchTrackerView)) return;
+		if (deck) leaf.view.focusDeck(deck);
+		else if (report) leaf.view.focusEvent(report);
 	}
 
 	async openDeckInBuilder(deck: Deck, source?: DeckSourceLink): Promise<void> {
@@ -403,8 +412,13 @@ export default class ChronoVaultPlugin extends Plugin {
 			const link = this.app.fileManager.generateMarkdownLink(file, "");
 			decks.push({ link, deck: this.firstDeck(await this.app.vault.cachedRead(file)) });
 		}
-		// Decks without a note: named after the deck, with their decklist from the code.
-		for (const deck of opts.codeDecks) decks.push({ link: deck.name, deck });
+		// Decks pasted as codes get a deck note (or use the one with their name), so their games can be logged.
+		for (const deck of opts.codeDecks) {
+			const name = deck.name.trim() || "Untitled deck";
+			const file = this.deckNotes().find((f) => f.basename.toLowerCase() === name.toLowerCase()) ?? (await this.templates.createDeckNote({ ...deck, name }, false));
+			if (file) decks.push({ link: this.app.fileManager.generateMarkdownLink(file, ""), deck: this.firstDeck(await this.app.vault.cachedRead(file)) ?? deck });
+			else decks.push({ link: name, deck });
+		}
 		await this.templates.createTournamentNote(opts.event, opts.date, opts.format, opts.rounds, decks);
 	}
 
